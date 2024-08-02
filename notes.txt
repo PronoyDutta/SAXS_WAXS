@@ -1,0 +1,7 @@
+02.08.2024
+# Change the function to find the relative times for the files as it should incororate the resting time 
+when the backgroung spectra was taken 
+
+# What happens as we first normalize the data and then add different backgrounds for each of the 
+spectra
+
