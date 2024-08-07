@@ -1,7 +1,18 @@
 02.08.2024
-# Change the function to find the relative times for the files as it should incororate the resting time 
+---> Change the function to find the relative times for the files as it should incororate the resting time 
 when the backgroung spectra was taken 
 
-# What happens as we first normalize the data and then add different backgrounds for each of the 
+---> What happens as we first normalize the data and then add different backgrounds for each of the 
 spectra
+Reply: The normalization of individual curves is a bad idea to execute as it completely changes the 
+relative time evaluation of the height of the peaks and readjusts everything to [0,1]
+
+07.08.2024
+
+# Comments from Christian
+
+---> Do a waterfall curve for the corrected WAXS data
+---> Do a filewise background subtraction 
+---> Remove the smoothing 
+---> Do a segmentwise peak fitting 
 
