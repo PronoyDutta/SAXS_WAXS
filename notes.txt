@@ -1,4 +1,16 @@
+##################################################################################################################
+                                     WHAT I WOULD LIKE TO INCORPORATE
+
+--> Include variables like starting and ending cycle, starting q to ending  q in a seperate text file 
+--> Improve the readability of the code by including more functions
+--> Create a mp4 file with all the different fitted curves and the electrochemical data and area under the 
+    curves properly 
+
+
+                                                                                                     Pronoy Dutta 
+##################################################################################################################
 02.08.2024
+
 ---> Change the function to find the relative times for the files as it should incororate the resting time 
 when the backgroung spectra was taken 
 
@@ -15,4 +27,3 @@ relative time evaluation of the height of the peaks and readjusts everything to 
 ---> Do a filewise background subtraction 
 ---> Remove the smoothing 
 ---> Do a segmentwise peak fitting 
-
