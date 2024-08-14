@@ -2,11 +2,33 @@
 # ...with a '#' in front so that it is ignored in data reading 
 
 # data_directory
-C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20240808_2503-SKJB_1MLITFSI-DOLDME_50uL_1G1PS\cycle
+C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20240812_2503SKJB_6MECDEC-200HFE_120uL_1G1PS\cycle
 
 # directory and name of the biologic file to be used
-./20240808_2503-SKJB_1mg_1MLiTFSI_DOLDME_0pt1LiNO3_50uL_1G1PS_C02.mpr
+./20240812_2503-SKJB_1pt1mg_6MECDEC_200HFE_120uL_1G1PS_C02.mpr
 
 # min and max limits for the saxs contourplots 
-
+0.1
+3
 # min and max limits for waxs contourplot 
+15
+20
+
+
+
+
+
+
+#List of directories 
+# 1M LiTFSI with DOL/DME and 0.1M LiNO3, 2 seperator (1G1PS) and 50 uL electrolyte
+# C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20240808_2503-SKJB_1MLITFSI-DOLDME_50uL_1G1PS\cycle
+# ./20240808_2503-SKJB_1mg_1MLiTFSI_DOLDME_0pt1LiNO3_50uL_1G1PS_C02.mpr
+
+# 6M EC/DEC with 200 HFE, 2 seperator (1G1PS) and 120 uL electrolyte 
+# C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20240812_2503SKJB_6MECDEC-200HFE_120uL_1G1PS\cycle
+# ./20240812_2503-SKJB_1pt1mg_6MECDEC_200HFE_120uL_1G1PS_C02.mpr
+
+# sat. DME with 200 HFE, 2 seperator (1G1PS) and 50 uL electrolyte
+# E:\20240805_2503SKJB_satDME_200HFE_1GS1PS_50uL\cycle
+# ./20240805_2503-SKJB_1pt3mg_satDME_200HFE_1G1PS_50uL_C02.mpr
+
