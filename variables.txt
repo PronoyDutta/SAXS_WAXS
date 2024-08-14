@@ -1,0 +1,12 @@
+# Variables for the contourplot script. Add any new line to this text file...
+# ...with a '#' in front so that it is ignored in data reading 
+
+# data_directory
+C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20240808_2503-SKJB_1MLITFSI-DOLDME_50uL_1G1PS\cycle
+
+# directory and name of the biologic file to be used
+./20240808_2503-SKJB_1mg_1MLiTFSI_DOLDME_0pt1LiNO3_50uL_1G1PS_C02.mpr
+
+# min and max limits for the saxs contourplots 
+
+# min and max limits for waxs contourplot 
