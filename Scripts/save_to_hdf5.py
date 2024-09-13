@@ -1,10 +1,10 @@
 import pandas as pd
 import h5py
 import os
-import glob
 from galvani import BioLogic as BL
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from tkinter import ttk  # Progressbar
 
 def read_data(file_name):
     legend_temp = ""
@@ -33,7 +33,10 @@ def read_electrochemical_data(mpr_file_path):
     elec_df_temp = pd.DataFrame(mpr.data)
     return elec_df_temp
 
-def save_to_hdf5(file_names, mpr_file_path, output_file, user_notes, sax_bg, wax_bg):
+def save_to_hdf5(file_names, mpr_file_path, output_file, user_notes, sax_bg, wax_bg, progress_callback):
+    total_steps = len(file_names) + (1 if sax_bg else 0) + (1 if wax_bg else 0) + (1 if mpr_file_path else 0) + 1
+    step = 0
+
     with h5py.File(output_file, 'w') as hdf5_file:
         timestamps = {'SAXS': [], 'WAXS': []}
         legends = {'SAXS': [], 'WAXS': []}
@@ -66,7 +69,10 @@ def save_to_hdf5(file_names, mpr_file_path, output_file, user_notes, sax_bg, wax
             # Collect timestamps and legends for separate saving
             timestamps[category].append((dataset_name, timestamp))
             legends[category].append((dataset_name, legend))
-        
+
+            step += 1
+            progress_callback(step / total_steps)
+
         # Create a group for timestamps
         timestamp_group = hdf5_file.create_group('Timestamps')
         for category, data in timestamps.items():
@@ -86,11 +92,15 @@ def save_to_hdf5(file_names, mpr_file_path, output_file, user_notes, sax_bg, wax
             bg_saxs_legend, bg_saxs_timestamp, bg_saxs_data = read_data(sax_bg)
             bg_group = hdf5_file.create_group('Backgrounds/SAXS')
             bg_group.create_dataset('SAXS_background', data=bg_saxs_data.values)
+            step += 1
+            progress_callback(step / total_steps)
         
         if wax_bg:
             bg_waxs_legend, bg_waxs_timestamp, bg_waxs_data = read_data(wax_bg)
             bg_group = hdf5_file.create_group('Backgrounds/WAXS')
             bg_group.create_dataset('WAXS_background', data=bg_waxs_data.values)
+            step += 1
+            progress_callback(step / total_steps)
 
         # Read and save electrochemical data if provided
         if mpr_file_path:
@@ -98,10 +108,15 @@ def save_to_hdf5(file_names, mpr_file_path, output_file, user_notes, sax_bg, wax
             elec_group = hdf5_file.create_group('ElectrochemicalData')
             elec_group.create_dataset('data', data=elec_df_temp.values)
             elec_group.create_dataset('headers', data=[header.encode('utf-8') for header in elec_df_temp.columns])
+            step += 1
+            progress_callback(step / total_steps)
         
         # Create a group for user notes
         notes_group = hdf5_file.create_group('UserNotes')
         notes_group.create_dataset('experiment_notes', data=user_notes.encode('utf-8'))
+
+        step += 1
+        progress_callback(step / total_steps)
 
 class HDF5App:
     def __init__(self, root):
@@ -134,6 +149,9 @@ class HDF5App:
         
         self.save_button = tk.Button(root, text='Save to HDF5', command=self.save_to_hdf5)
         self.save_button.pack(pady=10)
+
+        # Progress Bar (initially hidden)
+        self.progress = ttk.Progressbar(root, orient="horizontal", length=300, mode="determinate")
         
     def select_files(self):
         file_names = filedialog.askopenfilenames(filetypes=[('Data Files', '*.dat')])
@@ -164,8 +182,20 @@ class HDF5App:
         output_file = filedialog.asksaveasfilename(defaultextension=".h5", filetypes=[('HDF5 Files', '*.h5')])
         
         if output_file:
-            save_to_hdf5(self.file_names, self.mpr_file_path, output_file, user_notes, self.sax_bg, self.wax_bg)
+            # Show the progress bar when the 'SAVE' button is clicked
+            self.progress.pack(pady=10)
+            self.progress["value"] = 0
+            self.progress.update()
+
+            def update_progress(progress):
+                self.progress["value"] = progress * 100
+                self.progress.update()
+
+            save_to_hdf5(self.file_names, self.mpr_file_path, output_file, user_notes, self.sax_bg, self.wax_bg, update_progress)
             messagebox.showinfo('Success', 'Data successfully saved to HDF5 file.')
+            
+            # Hide the progress bar after the task is complete
+            self.progress.pack_forget()
 
 if __name__ == "__main__":
     root = tk.Tk()
