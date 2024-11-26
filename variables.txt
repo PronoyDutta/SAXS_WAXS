@@ -24,8 +24,8 @@
 
 
 # sat DME with 200 HFE, 2 seperator (1G1PS) with 120 uL electrolyte (redo) *****
-C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20240820_2503SKJB_satDME_200HFE_120uL_1G1PS\cycle
-./20240820_2503SKJB_1pt12mg_satDME_200HFE_120uL_1G1PS_C02.mpr
+#C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20240820_2503SKJB_satDME_200HFE_120uL_1G1PS\cycle
+#./20240820_2503SKJB_1pt12mg_satDME_200HFE_120uL_1G1PS_C02.mpr
 
 
 # 6M EC/DEC with 200 HFE, 2 seperator (1G1PS) and 120 uL electrolyte (redo)
@@ -42,11 +42,15 @@ C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_varia
 #C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20241024_SKJB_DOLDME_1to3vol_0pt2wt_LiNO3_2spacer\cycle
 #./20241023_SKJB_1pt6mg_DOLDME_1to3vol_opt2_LiNO3_120uL_1G1PS_C02.mpr
 
-#In use
+
 # 1M LiTFSI with DOL/DME (1:3) and 0.2 wt% LiNO3, 2 seperator (1G1PS) and 120 uL electrolyte (Both windows changed to Al)
 #C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20241031_SKJB_DOLDME_1to3vol_0pt2wt_LiNO3_2spacer\cycle
 #20241031_SKJB_1pt254mg_DOLDME_1to3vol_opt2_LiNO3_120uL_1G1PS_C02.mpr
 
+#In use
+# Manual mixing of S with KJB, standard electrolyte with DOL/DME (1:3) with LiNO3
+C:\Users\b1104371\OneDrive - Universität Salzburg\SAXS_backup\Electrolyte_variation\After_Beamtime\2503SKJB\20241120_SKJB_DOLDMEtto3_Al-windows\test
+20241115_SKJB_1pt66mg_DOLDME_1to3vol_opt2_LiNO3_120uL_1G1PS_C02.mpr
 
 # min and max limits for the saxs contourplots 
 0.13
