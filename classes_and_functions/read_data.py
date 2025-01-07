@@ -1,5 +1,8 @@
 import os
 import pandas as pd
+from datetime import datetime
+from galvani import BioLogic as BL  # For electrochemical data processing
+
 
 class DataReader:
     """
@@ -9,7 +12,7 @@ class DataReader:
     def __init__(self, directory):
         """
         Initialize the DataReader with a directory containing data files.
-        
+
         Parameters:
         directory (str): Path to the directory containing data files.
         """
@@ -35,13 +38,42 @@ class DataReader:
 
     def read_saxs_file(self, file_name):
         """
-        Read a SAXS data file.
+        Read a SAXS data file and extract timestamps.
 
         Parameters:
         file_name (str): The name of the SAXS file to read.
 
         Returns:
-        DataFrame: DataFrame containing the SAXS data.
+        tuple: (DataFrame, timestamp)
+        """
+        file_path = os.path.join(self.directory, file_name)
+        try:
+            with open(file_path, 'r') as file:
+                data_lines = []
+                data_storing = False
+                timestamp = None
+                for line in file:
+                    if 'Date' in line:
+                        timestamp = datetime.strptime(line.split()[2], '%Y-%m-%dT%H:%M:%S')
+                    if 'q(A-1)' in line:
+                        data_storing = True
+                        continue
+                    if data_storing:
+                        data_lines.append(line.strip())
+            data = pd.DataFrame([list(map(float, line.split())) for line in data_lines])
+            return data, timestamp
+        except Exception as e:
+            raise ValueError(f"Error reading SAXS file '{file_name}': {e}")
+
+    def read_waxs_file(self, file_name):
+        """
+        Read a WAXS data file.
+
+        Parameters:
+        file_name (str): The name of the WAXS file to read.
+
+        Returns:
+        DataFrame: DataFrame containing the WAXS data.
         """
         file_path = os.path.join(self.directory, file_name)
         try:
@@ -57,20 +89,7 @@ class DataReader:
             data = pd.DataFrame([list(map(float, line.split())) for line in data_lines])
             return data
         except Exception as e:
-            raise ValueError(f"Error reading SAXS file '{file_name}': {e}")
-
-    def read_waxs_file(self, file_name):
-        """
-        Read a WAXS data file.
-
-        Parameters:
-        file_name (str): The name of the WAXS file to read.
-
-        Returns:
-        DataFrame: DataFrame containing the WAXS data.
-        """
-        # Similar logic to SAXS but might include WAXS-specific parsing
-        return self.read_saxs_file(file_name)  # Placeholder, modify if different
+            raise ValueError(f"Error reading WAXS file '{file_name}': {e}")
 
     def read_electrochemical_file(self, file_name):
         """
@@ -80,55 +99,47 @@ class DataReader:
         file_name (str): The name of the electrochemical file to read.
 
         Returns:
-        tuple: (DataFrame, headers) - The electrochemical data and associated headers.
+        DataFrame: DataFrame containing the electrochemical data.
         """
-        from galvani import BioLogic as BL
         file_path = os.path.join(self.directory, file_name)
         try:
             ec_data = BL.MPRfile(file_path)
             data = pd.DataFrame(ec_data.data)
-            headers = ec_data.headers
-            return data, headers
+            return data
         except Exception as e:
             raise ValueError(f"Error reading electrochemical file '{file_name}': {e}")
 
-    def read_file(self, file_name):
-        """
-        General-purpose method to read a file based on its type.
-
-        Parameters:
-        file_name (str): The name of the file to read.
-
-        Returns:
-        DataFrame or tuple: Parsed data, format depends on file type.
-        """
-        if file_name.endswith(".dat") or file_name.endswith(".txt"):
-            if "_0_" in file_name:  # Assuming '_0_' indicates SAXS
-                return self.read_saxs_file(file_name)
-            elif "_1_" in file_name:  # Assuming '_1_' indicates WAXS
-                return self.read_waxs_file(file_name)
-        elif file_name.endswith(".mpr"):
-            return self.read_electrochemical_file(file_name)
-        else:
-            raise ValueError(f"Unsupported file type for file '{file_name}'.")
-
     def read_all_files(self):
         """
-        Read all files in the directory and categorize by type.
+        Read all files in the directory and organize them into categories.
 
         Returns:
-        dict: Dictionary containing data categorized by type:
-              {'SAXS': [...], 'WAXS': [...], 'Electrochemical': [...]}
+        dict: A dictionary with keys 'SAXS', 'WAXS', 'Electrochemical', and 'Timestamps',
+              where:
+              - 'SAXS': DataFrames for SAXS files.
+              - 'WAXS': DataFrames for WAXS files.
+              - 'Electrochemical': DataFrames for electrochemical files.
+              - 'Timestamps': List of SAXS file timestamps.
         """
-        all_data = {'SAXS': {}, 'WAXS': {}, 'Electrochemical': {}}
+        all_data = {'SAXS': {}, 'WAXS': {}, 'Electrochemical': {}, 'Timestamps': []}
+        sax_count, wax_count, ec_count = 0, 0, 0
+
         for file_name in self.list_files():
             try:
-                if "_0_" in file_name:
-                    all_data['SAXS'][file_name] = self.read_saxs_file(file_name)
-                elif "_1_" in file_name:
-                    all_data['WAXS'][file_name] = self.read_waxs_file(file_name)
-                elif file_name.endswith(".mpr"):
-                    all_data['Electrochemical'][file_name] = self.read_electrochemical_file(file_name)
+                if "_0_" in file_name and file_name.endswith(".dat"):  # SAXS files
+                    data, timestamp = self.read_saxs_file(file_name)
+                    all_data['SAXS'][sax_count] = data
+                    all_data['Timestamps'].append(timestamp)
+                    sax_count += 1
+                elif "_1_" in file_name and file_name.endswith(".dat"):  # WAXS files
+                    data = self.read_waxs_file(file_name)
+                    all_data['WAXS'][wax_count] = data
+                    wax_count += 1
+                elif file_name.endswith(".mpr"):  # Electrochemical files
+                    data = self.read_electrochemical_file(file_name)
+                    all_data['Electrochemical'][ec_count] = data
+                    ec_count += 1
             except Exception as e:
                 print(f"Warning: Could not read file '{file_name}': {e}")
+
         return all_data
