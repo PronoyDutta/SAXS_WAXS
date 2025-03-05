@@ -3,7 +3,6 @@ import pandas as pd
 from datetime import datetime
 from galvani import BioLogic as BL  # For electrochemical data processing
 
-
 class DataReader:
     """
     A class to read and process SAXS, WAXS, and electrochemical data files.
@@ -38,30 +37,27 @@ class DataReader:
 
     def read_saxs_file(self, file_name):
         """
-        Read a SAXS data file and extract timestamps.
+        Read a SAXS data file.
 
         Parameters:
         file_name (str): The name of the SAXS file to read.
 
         Returns:
-        tuple: (DataFrame, timestamp)
+        DataFrame: DataFrame containing the SAXS data.
         """
         file_path = os.path.join(self.directory, file_name)
         try:
             with open(file_path, 'r') as file:
                 data_lines = []
                 data_storing = False
-                timestamp = None
                 for line in file:
-                    if 'Date' in line:
-                        timestamp = datetime.strptime(line.split()[2], '%Y-%m-%dT%H:%M:%S')
                     if 'q(A-1)' in line:
                         data_storing = True
                         continue
                     if data_storing:
                         data_lines.append(line.strip())
             data = pd.DataFrame([list(map(float, line.split())) for line in data_lines])
-            return data, timestamp
+            return data
         except Exception as e:
             raise ValueError(f"Error reading SAXS file '{file_name}': {e}")
 
@@ -127,7 +123,16 @@ class DataReader:
         for file_name in self.list_files():
             try:
                 if "_0_" in file_name and file_name.endswith(".dat"):  # SAXS files
-                    data, timestamp = self.read_saxs_file(file_name)
+                    # Extract timestamp
+                    file_path = os.path.join(self.directory, file_name)
+                    with open(file_path, 'r') as file:
+                        timestamp = None
+                        for line in file:
+                            if 'Date' in line:
+                                timestamp = datetime.strptime(line.split()[2], '%Y-%m-%dT%H:%M:%S')
+                                break
+                    # Read SAXS data
+                    data = self.read_saxs_file(file_name)
                     all_data['SAXS'][sax_count] = data
                     all_data['Timestamps'].append(timestamp)
                     sax_count += 1
@@ -143,3 +148,4 @@ class DataReader:
                 print(f"Warning: Could not read file '{file_name}': {e}")
 
         return all_data
+
