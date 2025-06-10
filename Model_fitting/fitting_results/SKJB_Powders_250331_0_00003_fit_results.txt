@@ -1,0 +1,9 @@
+# Optimized Parameters
+A: 1.6856e-02
+exponent: 3.3055e+00
+delta_SLD_1: 1.1049e+10
+phi_1: 1.0000e-01
+xi1: 5.4819e+00
+delta_SLD_2: 1.8944e+10
+phi_2: 9.7732e-02
+xi2: 5.9910e-01
