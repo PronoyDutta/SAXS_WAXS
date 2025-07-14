@@ -5,26 +5,47 @@ from galvani import BioLogic as BL
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter import ttk  # Progressbar
+import re
 
 def read_data(file_name):
-    legend_temp = ""
-    data_line_temp = []
-    time_stamp_temp = ""
-    data_storing = False
-    
-    with open(file_name, 'r') as file:
+    legend_temp = None
+    time_stamp_temp = None
+    data_lines = []
+    data_storing = False  # Flag to detect when to start reading data
+
+    with open(file_name, 'r', encoding='utf-8', errors='replace') as file:
         for line in file:
-            if 'q(A-1)' in line:
-                data_storing = True
+            line = line.strip()  # Remove leading/trailing spaces
+
+            # Detect the last separator line and start storing data
+            if line.startswith("################################################################################"):
+                data_storing = True  # Start reading data after the last separator
                 continue
+
+            # Extract metadata
             if 'Comment' in line:
                 legend_temp = line.split()[4]
             if 'Date' in line:
-                time_stamp_temp = line.split()[2] 
-            if data_storing:
-                data_line_temp.append(line.strip())
-    df_temp = pd.DataFrame([line.split() for line in data_line_temp])
-    df_temp = df_temp.astype(float)
+                time_stamp_temp = line.split()[2]
+                
+            # Store numerical data after the separator
+            if data_storing and line and not line.startswith("#"):  # Ignore empty and comment lines
+                data_lines.append(line)
+
+    # Ensure we have data before processing
+    if len(data_lines) < 2:  # Must have at least one data row + header
+        print("No data found in the file!")
+        return legend_temp, time_stamp_temp, None
+
+    # Convert data into a DataFrame (handle variable spaces properly)
+    df_temp = pd.DataFrame([re.split(r'\s+', line) for line in data_lines])
+
+    # Assign correct column names from the first row
+    df_temp.columns = df_temp.iloc[0]  # First row contains column names
+    df_temp = df_temp[1:]  # Remove the header row from data
+
+    # Convert numeric columns to float
+    df_temp = df_temp.apply(pd.to_numeric, errors='coerce')
 
     return legend_temp, time_stamp_temp, df_temp
 
