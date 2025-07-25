@@ -40,7 +40,7 @@ def plot_rate_performance(all_groups, theoretical_capacity, cycle_start, cycle_e
             group_y = []
 
             for cyc, g in grouped:
-                cap_mAh = g["capacity_mAh"].iloc[-1]
+                cap_mAh = abs(g["capacity_mAh"].iloc[-1])
                 spec_cap = cap_mAh / mass_g
                 group_x.append(cycle_offset + cyc)
                 group_y.append(spec_cap)
