@@ -1,20 +1,23 @@
 {
-  "image": "mcr.microsoft.com/devcontainers/universal:2",
-  "hostRequirements": {
-    "cpus": 4
+  "name": "SAXS_WAXS Python Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
   },
-  "waitFor": "onCreateCommand",
-  "updateContentCommand": "python3 -m pip install -r requirements.txt",
-  "postCreateCommand": "",
+  "postCreateCommand": "pip install --upgrade pip",
   "customizations": {
-    "codespaces": {
-      "openFiles": []
-    },
     "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      },
       "extensions": [
-        "ms-toolsai.jupyter",
-        "ms-python.python"
+        "ms-python.python",
+        "ms-toolsai.jupyter"
       ]
     }
-  }
+  },
+  "mounts": [
+    "source=/c,target=/mnt/c,type=bind,consistency=cached",
+    "source=/e,target=/mnt/e,type=bind,consistency=cached"
+  ]
 }
