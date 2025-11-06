@@ -33,17 +33,6 @@ def load_gcd_data(project_dir, sample_names, cycle_numbers=None):
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import numpy as np
-
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import numpy as np
-
 def plot_gcd_curves(groups):
     fig, ax = plt.subplots(figsize=(8, 6))
 
