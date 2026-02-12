@@ -1,6 +1,8 @@
 import os
+import json
 import pickle
 import pandas as pd
+import numpy as np
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 from datetime import datetime
@@ -25,6 +27,9 @@ class SampleAdderApp:
         self.setup_save_button()
         self.view_button = ttk.Button(self.root, text="View Saved Samples", command=self.view_saved_samples)
         self.view_button.pack(pady=5)
+        # Export aggregated metadata across all samples/tests
+        self.export_button = ttk.Button(self.root, text="Export All Metadata to Excel", command=self.export_all_metadata_to_excel)
+        self.export_button.pack(pady=5)
 
     def setup_source_selector(self):
         frame = ttk.LabelFrame(self.root, text="Instrument Type")
@@ -72,9 +77,30 @@ class SampleAdderApp:
         test_type_menu.grid(row=len(self.entries), column=1, padx=5, pady=2)
         self.entries["test_type"] = self.test_type_var
 
-        ttk.Label(frame, text="Notes").grid(row=len(self.entries)+1, column=0, sticky="nw", padx=5, pady=2)
+        # Instead of a boolean include option, allow entering the Rate denominator N (for C/N)
+        self.rate_N_label = ttk.Label(frame, text="Rate (N from C/N)")
+        self.rate_N_label.grid(row=len(self.entries)+1, column=0, sticky="w", padx=5, pady=2)
+        self.rate_N_var = tk.StringVar(value="")
+        self.rate_N_entry = ttk.Entry(frame, textvariable=self.rate_N_var, width=12)
+        self.rate_N_entry.grid(row=len(self.entries)+1, column=1, padx=5, pady=2, sticky="w")
+
+        # Show the Rate(N) field only for GCD selection
+        def _toggle_rate_field(*_):
+            if self.test_type_var.get() == "GCD":
+                # show
+                self.rate_N_label.grid()
+                self.rate_N_entry.grid()
+            else:
+                # hide and clear
+                self.rate_N_var.set("")
+                self.rate_N_label.grid_remove()
+                self.rate_N_entry.grid_remove()
+        _toggle_rate_field()
+        test_type_menu.bind("<<ComboboxSelected>>", _toggle_rate_field)
+
+        ttk.Label(frame, text="Notes").grid(row=len(self.entries)+2, column=0, sticky="nw", padx=5, pady=2)
         self.notes_text = tk.Text(frame, width=40, height=4)
-        self.notes_text.grid(row=len(self.entries)+1, column=1, padx=5, pady=2)
+        self.notes_text.grid(row=len(self.entries)+2, column=1, padx=5, pady=2)
         self.entries["notes"] = self.notes_text
 
         self.entries["date"] = datetime.today().strftime("%Y-%m-%d")
@@ -140,6 +166,16 @@ class SampleAdderApp:
             messagebox.showinfo("Ready", f"{len(self.file_paths)} Neware file(s) selected. Click 'Save' to process.")
 
     def get_metadata(self):
+        # Parse Rate N if provided (only for GCD). Store as float if valid, else None.
+        rate_N_val = None
+        try:
+            if self.entries["test_type"].get().strip() == "GCD":
+                v = (self.rate_N_var.get() or "").strip()
+                if v != "":
+                    rate_N_val = float(v)
+        except Exception:
+            rate_N_val = None
+
         return {
             "source": self.source_var.get(),
             "file_paths": self.file_paths,
@@ -150,6 +186,7 @@ class SampleAdderApp:
             "electrolyte": self.entries["electrolyte"].get().strip(),
             "electrode": self.entries["electrode"].get().strip(),
             "test_type": self.entries["test_type"].get().strip(),
+            "rate_c_over_n": rate_N_val,
             "notes": self.entries["notes"].get("1.0", "end-1c").strip(),
             "date": self.entries["date"]
         }
@@ -216,6 +253,152 @@ class SampleAdderApp:
         except Exception as e:
             progress_win.destroy()
             messagebox.showerror("Error", f"Failed to save data:\n{str(e)}")
+
+    def export_all_metadata_to_excel(self):
+        """Collect metadata from every sample/test in the selected project folder
+        and write/update a single Excel workbook (project_metadata.xlsx).
+        Rows are keyed by (sample_id, test_type); existing rows are updated, new rows appended.
+        Fallback to CSV if openpyxl (Excel writer) is unavailable.
+        """
+        project = self.project_folder
+        if not project or not os.path.isdir(project):
+            messagebox.showwarning("No Project", "Please select a valid project folder before exporting.")
+            return
+
+        def _normalise_value(value):
+            """Convert metadata values into DataFrame-friendly representations."""
+            if value is None:
+                return ""
+            if isinstance(value, np.ndarray):
+                return _normalise_value(value.tolist())
+            if isinstance(value, (list, tuple, set)):
+                flattened = [_normalise_value(v) for v in value]
+                return json.dumps(flattened)
+            if isinstance(value, dict):
+                return json.dumps({str(k): _normalise_value(v) for k, v in value.items()})
+            if isinstance(value, (datetime, pd.Timestamp)):
+                return str(value)
+            try:
+                if pd.isna(value):
+                    return ""
+            except Exception:
+                pass
+            return str(value)
+
+        # Only extract these specific columns from metadata - ignore everything else
+        wanted_keys = [
+            "sample_id",
+            "test_type",
+            "source",
+            "mass_mg",
+            "area_cm2",
+            "thickness_um",
+            "electrolyte",
+            "electrode",
+            "rate_c_over_n",
+            "notes",
+            "date",
+        ]
+
+        def safe_str(val):
+            """Convert any value to string safely"""
+            if val is None or val == "":
+                return ""
+            if isinstance(val, (list, tuple, np.ndarray)):
+                return ", ".join(str(x) for x in val)
+            try:
+                return str(val)
+            except Exception:
+                return ""
+
+        rows = []
+        try:
+            for sample in sorted(os.listdir(project)):
+                sample_dir = os.path.join(project, sample)
+                if not os.path.isdir(sample_dir):
+                    continue
+                for test in sorted(os.listdir(sample_dir)):
+                    test_dir = os.path.join(sample_dir, test)
+                    if not os.path.isdir(test_dir):
+                        continue
+                    meta_path = os.path.join(test_dir, "metadata.pkl")
+                    if not os.path.isfile(meta_path):
+                        continue
+                    
+                    try:
+                        with open(meta_path, "rb") as f:
+                            meta = pickle.load(f)
+                    except Exception:
+                        continue
+                    
+                    if not isinstance(meta, dict):
+                        continue
+
+                    # Extract only the fields we need (matching get_metadata structure)
+                    row = {
+                        "sample_id": safe_str(meta.get("sample_id", sample)),
+                        "test_type": safe_str(meta.get("test_type", test)),
+                        "source": safe_str(meta.get("source", "")),
+                        "mass_mg": safe_str(meta.get("mass_mg", "")),
+                        "area_cm2": safe_str(meta.get("area_cm2", "")),
+                        "thickness_um": safe_str(meta.get("thickness_um", "")),
+                        "electrolyte": safe_str(meta.get("electrolyte", "")),
+                        "electrode": safe_str(meta.get("electrode", "")),
+                        "rate_c_over_n": safe_str(meta.get("rate_c_over_n", "")),
+                        "notes": safe_str(meta.get("notes", "")),
+                        "date": safe_str(meta.get("date", "")),
+                        "sample_folder": sample_dir,
+                        "test_folder": test_dir,
+                    }
+                    rows.append(row)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed while scanning folders:\n{e}")
+            return
+        if not rows:
+            messagebox.showinfo("No Metadata", "No metadata.pkl files found in the project folder.")
+            return
+        # Write directly to CSV first (avoids DataFrame creation issues)
+        import csv
+        csv_path = os.path.join(project, "project_metadata.csv")
+        excel_path = os.path.join(project, "project_metadata.xlsx")
+        
+        final_columns = wanted_keys + ["sample_folder", "test_folder"]
+        key_cols = ["sample_id", "test_type"]
+        
+        # Read existing rows if CSV exists
+        existing_rows = {}
+        if os.path.isfile(csv_path):
+            try:
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        key = (row.get("sample_id", ""), row.get("test_type", ""))
+                        existing_rows[key] = row
+            except Exception:
+                pass
+        
+        # Update with new rows
+        for row in rows:
+            key = (row.get("sample_id", ""), row.get("test_type", ""))
+            existing_rows[key] = row
+        
+        # Write CSV
+        try:
+            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=final_columns, extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows(existing_rows.values())
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Could not write CSV: {e}")
+            return
+        
+        # Try to convert to Excel
+        try:
+            df = pd.read_csv(csv_path, dtype=str)
+            df.to_excel(excel_path, index=False)
+            messagebox.showinfo("Export Complete", f"Metadata written/updated: {excel_path}")
+        except Exception as e:
+            messagebox.showinfo("Export Complete", f"CSV written: {csv_path}\n(Excel conversion failed: {e})")
 
     def view_saved_samples(self):
         project_dir = filedialog.askdirectory(title="Select Project Folder")
