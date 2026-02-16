@@ -1,5 +1,13 @@
 import os
 import pandas as pd
+import numpy as np
+
+# Plot style settings (edit these to quickly tune typography/size)
+GCD_FIGSIZE = (4, 3)
+GCD_TITLE_FONTSIZE = 13
+GCD_AXIS_LABEL_FONTSIZE = 13
+GCD_TICK_LABEL_FONTSIZE = 11
+GCD_LEGEND_FONTSIZE = 10
 
 def load_gcd_data(project_dir, sample_names, cycle_numbers=None):
     """
@@ -32,13 +40,13 @@ def load_gcd_data(project_dir, sample_names, cycle_numbers=None):
 
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from matplotlib.font_manager import FontProperties  # for +1 pt font adjustments
 
 def plot_gcd_curves(
     groups,
     grid: bool = True,
     color_scheme: str = "nipy_spectral",
     custom_colors=None,
+    separate_halfcycle_colors: bool = False,
     legend_loc: str = "upper right",
     legend_xy: tuple | None = None,
     legend_draggable: bool = False,
@@ -46,22 +54,21 @@ def plot_gcd_curves(
     ylim: tuple | None = None,
 ):
     # Match the rate plot figure sizing for visual consistency
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=GCD_FIGSIZE)
 
-    # Build color list per group
-    total_cycles = sum(
-        df['cycle_number'].nunique() - (1 if 0 in df['cycle_number'].unique() else 0)
-        for g in groups for df in g['data'].values()
-    )
-    cmap = cm.get_cmap(color_scheme, total_cycles) if color_scheme != "default" else None
-
+    # Build color keys per cycle (or per cycle+half-cycle when requested).
     color_keys = []
     for group in groups:
         for sample, df in group["data"].items():
             for cyc in df['cycle_number'].unique():
                 if cyc != 0:
-                    color_keys.append(f"{sample}_C{cyc}_{group['label']}")
+                    if separate_halfcycle_colors:
+                        color_keys.append(f"{sample}_C{cyc}_H1_{group['label']}")
+                        color_keys.append(f"{sample}_C{cyc}_H2_{group['label']}")
+                    else:
+                        color_keys.append(f"{sample}_C{cyc}_{group['label']}")
     color_keys = sorted(set(color_keys))
+    cmap = cm.get_cmap(color_scheme, max(len(color_keys), 1)) if color_scheme != "default" else None
 
     color_map = {}
     # If default scheme, use Matplotlib's default color cycle explicitly
@@ -92,7 +99,6 @@ def plot_gcd_curves(
         for sample, df in group["data"].items():
             mass_g = float(group["masses"].get(sample, 1.0)) / 1000
             df = df.copy()
-            df['specific_capacity'] = (df['capacity_mAh'] / mass_g).abs()
             # Only consider half_cycle 1 (discharge) and 2 (charge)
             df = df[df['half_cycle'].isin([1, 2])]
             grouped = df.groupby(['cycle_number', 'half_cycle'])
@@ -100,28 +106,40 @@ def plot_gcd_curves(
             for (cyc, half), subdf in grouped:
                 if cyc == 0:
                     continue
-                color_key = f"{sample}_C{cyc}_{group_label}"
+                if separate_halfcycle_colors:
+                    color_key = f"{sample}_C{cyc}_H{int(half)}_{group_label}"
+                else:
+                    color_key = f"{sample}_C{cyc}_{group_label}"
                 color = color_map.get(color_key, None)
                 label = f"{group_label}" if half == 1 else None
-                #label = f"{group_label} - Cycle {cyc}" if half == 1 else None
-                # Always pass an explicit color if we resolved one so charge/discharge match
-                if color is not None:
-                    ax.plot(subdf['specific_capacity'], subdf['voltage_V'], color=color, label=label)
-                else:
-                    ax.plot(subdf['specific_capacity'], subdf['voltage_V'], label=label)
+                if "time_s" in subdf.columns:
+                    subdf = subdf.sort_values("time_s")
 
-    ax.set_xlabel("Specific Capacity (mAh g$^{-1}$)")
-    ax.set_ylabel("Potential (V vs. Li/Li+)")
-    ax.set_title("GCD Curves")
-    # Increase axis label and tick label fontsize by +1 pt (mirrors rate plot behavior)
-    try:
-        label_size_base = FontProperties(size=plt.rcParams.get('axes.labelsize', plt.rcParams.get('font.size', 10.0))).get_size_in_points()
-        tick_size_base = FontProperties(size=plt.rcParams.get('xtick.labelsize', plt.rcParams.get('font.size', 10.0))).get_size_in_points()
-        ax.set_xlabel(ax.get_xlabel(), fontsize=label_size_base + 1)
-        ax.set_ylabel(ax.get_ylabel(), fontsize=label_size_base + 1)
-        ax.tick_params(axis='both', labelsize=tick_size_base + 1)
-    except Exception:
-        ax.tick_params(axis='both', labelsize=11)
+                q = subdf["capacity_mAh"].to_numpy(dtype=float)
+                v = subdf["voltage_V"].to_numpy(dtype=float)
+                if len(q) < 2:
+                    continue
+
+                # BioLogic exports can include one carry-over capacity point at half-cycle start.
+                # Drop it when the second point clearly resets close to zero.
+                if np.abs(q[1]) < 0.25 * np.abs(q[0]) and np.abs(q[0] - q[1]) > 1e-4:
+                    q = q[1:]
+                    v = v[1:]
+                    if len(q) < 2:
+                        continue
+
+                # Plot capacity relative to half-cycle start to avoid artificial connectors.
+                x = np.abs(q - q[0]) / mass_g
+
+                if color is not None:
+                    ax.plot(x, v, color=color, label=label)
+                else:
+                    ax.plot(x, v, label=label)
+
+    ax.set_xlabel("Specific Capacity (mAh g$^{-1}$)", fontsize=GCD_AXIS_LABEL_FONTSIZE)
+    ax.set_ylabel("Potential (V vs. Li/Li+)", fontsize=GCD_AXIS_LABEL_FONTSIZE)
+    ax.set_title("GCD Curves", fontsize=GCD_TITLE_FONTSIZE)
+    ax.tick_params(axis='both', labelsize=GCD_TICK_LABEL_FONTSIZE)
     # Apply user-defined axis ranges if provided
     try:
         if xlim is not None and len(xlim) == 2:
@@ -132,9 +150,15 @@ def plot_gcd_curves(
         pass
     # Legend: no frame. If manual position provided, anchor to (x,y) in axes coords
     if legend_xy is not None:
-        leg = ax.legend(frameon=False, loc="center", bbox_to_anchor=legend_xy, bbox_transform=ax.transAxes)
+        leg = ax.legend(
+            frameon=False,
+            loc="center",
+            bbox_to_anchor=legend_xy,
+            bbox_transform=ax.transAxes,
+            fontsize=GCD_LEGEND_FONTSIZE,
+        )
     else:
-        leg = ax.legend(frameon=False, loc=legend_loc)
+        leg = ax.legend(frameon=False, loc=legend_loc, fontsize=GCD_LEGEND_FONTSIZE)
     if legend_draggable and leg is not None:
         try:
             leg.set_draggable(True)

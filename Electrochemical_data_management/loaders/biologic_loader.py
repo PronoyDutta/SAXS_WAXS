@@ -1,8 +1,25 @@
 # loaders/biologic_loader.py
 
 import os
-import pandas as pd
-from galvani import BioLogic as BL
+import numpy as np
+from galvani.BioLogic import MPRfile
+
+OUTPUT_COLUMNS = [
+    "cycle_number",
+    "half_cycle",
+    "time_s",
+    "current_mA",
+    "voltage_V",
+    "capacity_mAh",
+]
+
+
+def _pick_field(field_names, aliases):
+    for name in aliases:
+        if name in field_names:
+            return name
+    return None
+
 
 def load_biologic_gcd_mpr(filepaths):
     results = {}
@@ -12,65 +29,83 @@ def load_biologic_gcd_mpr(filepaths):
         result = {'data': None, 'meta': None, 'error': None}
 
         try:
-            exp = BL.MPRfile(path)
-            df = pd.DataFrame(exp.data)
-            df.columns = df.columns.str.strip()
+            exp = MPRfile(path)
+            data = exp.data
+            field_names = set(data.dtype.names or ())
 
-            # Rename relevant columns
-            df = df.rename(columns={
-                'time/s': 'time_s',
-                'Ewe/V': 'voltage_V',
-                'control/V/mA': 'current_mA',
-                'Ns': 'step',
-                'Q charge/discharge/mA.h': 'capacity_mAh',
-            })
+            time_col = _pick_field(field_names, ["time/s"])
+            voltage_col = _pick_field(field_names, ["Ewe/V"])
+            current_col = _pick_field(field_names, ["control/V/mA", "I/mA"])
+            cap_col = _pick_field(field_names, ["Q charge/discharge/mA.h", "Q discharge/mA.h"])
 
-            # Drop unnecessary columns
-            drop_cols = [col for col in ['flag', 'Current range', 'P/W'] if col in df.columns]
-            df.drop(columns=drop_cols, inplace=True, errors='ignore')
+            missing = []
+            if time_col is None:
+                missing.append("time/s")
+            if voltage_col is None:
+                missing.append("Ewe/V")
+            if current_col is None:
+                missing.append("control/V/mA or I/mA")
+            if cap_col is None:
+                missing.append("Q charge/discharge/mA.h or Q discharge/mA.h")
+            if missing:
+                raise ValueError(f"Missing required BioLogic columns: {', '.join(missing)}")
 
-            # Assign current_sign
-            df['current_sign'] = df['current_mA'].apply(lambda x: 0 if abs(x) < 1e-5 else (1 if x > 0 else -1))
+            time_s = np.asarray(data[time_col], dtype=float)
+            voltage_v = np.asarray(data[voltage_col], dtype=float)
+            current_ma = np.asarray(data[current_col], dtype=float)
+            capacity_mah = np.asarray(data[cap_col], dtype=float)
 
-            # Initialize cycle and half_cycle tracking
-            cycle = 1  # First active cycle will be 1
+            # Assign current sign (charge/discharge/rest).
+            current_sign = np.where(np.abs(current_ma) < 1e-5, 0, np.where(current_ma > 0, 1, -1))
+
+            # Track cycles from sign changes, while keeping numbering through rest periods.
+            cycle = 0
             half = 0
-            prev_sign = 0
+            half_abs = 0
+            prev_nonzero_sign = 0
             cycle_nums = []
             half_cycles = []
 
-            for sign in df['current_sign']:
+            for sign in current_sign:
                 if sign == 0:
-                    # Rest state
-                    half_cycles.append(0)
-                    cycle_nums.append(0)
-                else:
-                    if prev_sign == 0:
-                        half = 1
-                    elif prev_sign * sign < 0:
-                        if half == 1:
-                            half = 2
-                        else:
-                            half = 1
-                            cycle += 1
+                    # Keep last known half/cycle during rest.
                     half_cycles.append(half)
                     cycle_nums.append(cycle)
-                prev_sign = sign
+                    continue
 
-            df['cycle_number'] = cycle_nums
-            df['half_cycle'] = half_cycles
+                if prev_nonzero_sign == 0:
+                    cycle = 1
+                    half = 1
+                    half_abs = 1
+                elif prev_nonzero_sign * sign < 0:
+                    half_abs += 1
+                    if half == 1:
+                        half = 2
+                    else:
+                        half = 1
+                        cycle += 1
 
-            # Final column selection
-            df = df[['cycle_number', 'half_cycle', 'time_s', 'current_mA', 'voltage_V', 'capacity_mAh']]
+                half_cycles.append(half)
+                cycle_nums.append(cycle)
+                prev_nonzero_sign = sign
+
+            data_dict = {
+                "cycle_number": np.asarray(cycle_nums, dtype=int),
+                "half_cycle": np.asarray(half_cycles, dtype=int),
+                "time_s": time_s,
+                "current_mA": current_ma,
+                "voltage_V": voltage_v,
+                "capacity_mAh": capacity_mah,
+            }
 
             # Extract metadata
             meta = {
-                'num_half_cycles': df['half_cycle'].nunique(),
-                'max_voltage': df['voltage_V'].max(),
-                'min_voltage': df['voltage_V'].min()
+                'num_half_cycles': int(half_abs),
+                'max_voltage': float(np.nanmax(voltage_v)),
+                'min_voltage': float(np.nanmin(voltage_v))
             }
 
-            result['data'] = df
+            result['data'] = data_dict
             result['meta'] = meta
 
         except Exception as e:

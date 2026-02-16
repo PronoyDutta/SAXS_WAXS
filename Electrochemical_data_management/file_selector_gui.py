@@ -1,5 +1,6 @@
 import os
 import json
+import csv
 import pickle
 import pandas as pd
 import numpy as np
@@ -228,9 +229,18 @@ class SampleAdderApp:
             if self.source_var.get() == "BioLogic" and test_type == "GCD":
                 for i, (fname, result) in enumerate(self.loaded_data.items()):
                     if result["error"] is None:
-                        df = result["data"]
+                        data = result["data"]
                         name = os.path.splitext(os.path.basename(fname))[0]
-                        df.to_csv(os.path.join(test_folder, f"{name}.csv"), index=False)
+                        out_path = os.path.join(test_folder, f"{name}.csv")
+                        if isinstance(data, dict):
+                            columns = ["cycle_number", "half_cycle", "time_s", "current_mA", "voltage_V", "capacity_mAh"]
+                            with open(out_path, "w", newline="") as f:
+                                writer = csv.writer(f)
+                                writer.writerow(columns)
+                                for row in zip(*(data[c] for c in columns)):
+                                    writer.writerow(row)
+                        else:
+                            data.to_csv(out_path, index=False)
                     progress_bar["value"] = i + 1
                     self.root.update_idletasks()
 
