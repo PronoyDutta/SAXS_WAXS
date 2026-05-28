@@ -1,73 +1,84 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
+from .utils import find_nearest_time
 
-
-def find_nearest_time(target_time, sax_timestamps):
-    """
-    Find the SAXS file index with the closest timestamp to the target time.
-
-    Parameters:
-    target_time (float): Target time in seconds to match.
-    sax_timestamps (list): List of SAXS file timestamps (datetime objects).
-
-    Returns:
-    int: Index of the closest timestamp.
-    """
-    # Convert sax_timestamps to seconds since the start
-    sax_start_time = sax_timestamps[0]
-    sax_timestamps_in_seconds = [(t - sax_start_time).total_seconds() for t in sax_timestamps]
-
-    # Find the closest timestamp
-    time_differences = [abs(target_time - t) for t in sax_timestamps_in_seconds]
-    return time_differences.index(min(time_differences))
-
-
-
-def process_electrochemical_data(all_data):
+def process_electrochemical_data(all_data, rate):
     """
     Process electrochemical data and link it with the nearest SAXS file timestamps.
 
     Parameters:
     all_data (dict): Dictionary containing electrochemical data and SAXS timestamps.
+    rate (float): Discharge-charge rate (value of N in C/N).
 
     Returns:
     dict: Processed electrochemical data linked with SAXS file numbers.
     """
-    # Ask the user for the discharge rate
-    rate = float(input("Enter discharge-charge rate, value of N in (C/N): "))
+    electrochemical_df = all_data.get('Electrochemical')
+    if electrochemical_df is None or electrochemical_df.empty:
+        print("No electrochemical data found.")
+        return None
 
-    electrochemical_df = all_data['Electrochemical'][0]
-    sax_timestamps = all_data['Timestamps']
+    sax_timestamps = all_data.get('TimeStamps_SAXS', {})
+
+    # Check for the correct column names, which differ between individual MPR and HDF5 extraction
+    if 'Ns' in electrochemical_df.columns:
+        ns_col = 'Ns'
+        time_col = 'time/s'
+        volt_col = 'Ewe/V'
+        ctrl_col = 'control/V/mA'
+    elif 9 in electrochemical_df.columns: # fallback for HDF5 index-based columns if headers are missing
+        ns_col = 9
+        time_col = 2 # typically 'time/s'
+        volt_col = 6 # typically 'Ewe/V'
+        ctrl_col = 5 # typically 'I/mA'
+    else:
+        # Just use positional as a wild guess or return early
+        print("Warning: Could not identify standard electrochemical columns.")
+        return None
 
     # Filter the data to remove OCV periods (Ns != 0)
-    elec_df = electrochemical_df[electrochemical_df['Ns'] != 0]
+    elec_df = electrochemical_df[electrochemical_df[ns_col] != 0]
+    if elec_df.empty:
+        print("No non-OCV electrochemical data found.")
+        return None
 
     # Detect cycle changes
     cycle_change_index = [elec_df.index[0]]
-    absolute_times_for_electrochemical_state_change = [elec_df.loc[elec_df.index[0], 'time/s']]
+    absolute_times_for_electrochemical_state_change = [elec_df.loc[elec_df.index[0], time_col]]
 
-    for line in range(len(elec_df['Ns']) - 1):
-        if elec_df['Ns'].iloc[line] != elec_df['Ns'].iloc[line + 1]:
+    for line in range(len(elec_df[ns_col]) - 1):
+        if elec_df[ns_col].iloc[line] != elec_df[ns_col].iloc[line + 1]:
             cycle_change_index.append(elec_df.index[line + 1])
             absolute_times_for_electrochemical_state_change.append(
-                elec_df.loc[elec_df.index[line + 1], 'time/s']
+                elec_df.loc[elec_df.index[line + 1], time_col]
             )
 
     # Add the last index and time
     cycle_change_index.append(elec_df.index[-1])
-    absolute_times_for_electrochemical_state_change.append(elec_df.loc[elec_df.index[-1], 'time/s'])
+    absolute_times_for_electrochemical_state_change.append(elec_df.loc[elec_df.index[-1], time_col])
 
     # Convert absolute times to seconds relative to SAXS start time
-    sax_start_time = sax_timestamps[0]
-    absolute_times_in_seconds = [
-        (datetime.fromtimestamp(t) - sax_start_time).total_seconds() if isinstance(t, (int, float)) else t
-        for t in absolute_times_for_electrochemical_state_change
-    ]
+    keys = list(sax_timestamps.keys())
+    if not keys:
+        print("No SAXS timestamps found.")
+        return None
+
+    # Try to calculate start time from timestamp format
+    try:
+        sax_start_time = datetime.strptime(str(sax_timestamps[keys[0]]), '%Y-%m-%dT%H:%M:%S')
+        absolute_times_in_seconds = [
+            (datetime.fromtimestamp(t) - sax_start_time).total_seconds() if isinstance(t, (int, float)) else t
+            for t in absolute_times_for_electrochemical_state_change
+        ]
+    except ValueError:
+        # Fallback if timestamps are already numeric or different format
+        sax_start_time = float(sax_timestamps[keys[0]])
+        absolute_times_in_seconds = absolute_times_for_electrochemical_state_change
 
     # Link each cycle change with the nearest SAXS file
     saxs_file_numbers = [
-        find_nearest_time(time, sax_timestamps)
+        find_nearest_time(time, sax_timestamps)[0]
         for time in absolute_times_for_electrochemical_state_change
     ]
 
@@ -79,8 +90,8 @@ def process_electrochemical_data(all_data):
     print(saxs_file_numbers)
 
     # Plot the electrochemical data
-    Elec_Xdata = elec_df['time/s']
-    Elec_Ydata = elec_df['Ewe/V']
+    Elec_Xdata = elec_df[time_col]
+    Elec_Ydata = elec_df[volt_col]
     plt.plot(Elec_Xdata, Elec_Ydata)
     plt.xlabel('Time (s)')
     plt.ylabel('Potential (V)')
@@ -88,7 +99,7 @@ def process_electrochemical_data(all_data):
     plt.show()
 
     # Calculate applied current and active material mass
-    applied_current = abs(elec_df['control/V/mA'].iloc[0])
+    applied_current = abs(elec_df[ctrl_col].iloc[0])
     print("Applied current:", applied_current)
 
     active_material_mass = (applied_current * 1000 * rate) / 1675.0

@@ -1,151 +1,184 @@
 import os
+import re
+import glob
 import pandas as pd
 from datetime import datetime
-from galvani import BioLogic as BL  # For electrochemical data processing
+import h5py
+from galvani import BioLogic as BL
 
 class DataReader:
     """
-    A class to read and process SAXS, WAXS, and electrochemical data files.
+    A unified class to read and process SAXS, WAXS, and electrochemical data files.
+    Supports reading from a directory of individual files (.dat, .mpr) or a single HDF5 file.
     """
 
-    def __init__(self, directory):
+    def __init__(self, data_format, data_path, mpr_file_path=None):
         """
-        Initialize the DataReader with a directory containing data files.
-
         Parameters:
-        directory (str): Path to the directory containing data files.
+        - data_format (str): 'Individual' or 'HDF5'
+        - data_path (str): Path to the directory (if Individual) or the .h5 file (if HDF5)
+        - mpr_file_path (str): Path to the .mpr file (only needed if data_format is 'Individual')
         """
-        self.directory = directory
+        self.data_format = data_format.lower()
+        self.data_path = data_path
+        self.mpr_file_path = mpr_file_path
 
-    def list_files(self, file_type=None):
+    def _read_individual_dat(self, file_path):
+        legend_temp = None
+        time_stamp_temp = None
+        data_lines = []
+        data_storing = False
+
+        with open(file_path, 'r', encoding='utf-8') as file:
+            for line in file:
+                line = line.strip()
+
+                if line.startswith("################################################################################"):
+                    data_storing = True
+                    continue
+
+                if 'Comment' in line:
+                    parts = line.split()
+                    if len(parts) > 4:
+                        legend_temp = parts[4]
+                if 'Date' in line:
+                    parts = line.split()
+                    if len(parts) > 2:
+                        time_stamp_temp = parts[2]
+                    
+                if data_storing and line and not line.startswith("#"):
+                    data_lines.append(line)
+
+        if len(data_lines) < 2:
+            return legend_temp, time_stamp_temp, None
+
+        df_temp = pd.DataFrame([re.split(r'\s+', line) for line in data_lines])
+        df_temp.columns = df_temp.iloc[0]
+        df_temp = df_temp[1:]
+        df_temp = df_temp.apply(pd.to_numeric, errors='coerce')
+
+        return legend_temp, time_stamp_temp, df_temp
+
+    def read_data(self):
         """
-        List all files in the directory with optional filtering by file type.
-
-        Parameters:
-        file_type (str): File extension to filter by (e.g., 'csv', 'dat', 'mpr').
-
-        Returns:
-        list: List of file names matching the criteria.
+        Reads the data based on the initialized format.
+        
+        Returns a dictionary containing:
+        {
+            'SAXS': {file_number: DataFrame, ...},
+            'WAXS': {file_number: DataFrame, ...},
+            'TimeStamps_SAXS': {file_number: timestamp, ...},
+            'TimeStamps_WAXS': {file_number: timestamp, ...},
+            'Legends': {file_number: legend, ...},
+            'Electrochemical': DataFrame,
+            'Background_SAXS': DataFrame (if available),
+            'Background_WAXS': DataFrame (if available)
+        }
         """
-        try:
-            files = [f for f in os.listdir(self.directory) if os.path.isfile(os.path.join(self.directory, f))]
-            if file_type:
-                files = [f for f in files if f.endswith(f".{file_type}")]
-            return files
-        except Exception as e:
-            raise FileNotFoundError(f"Error accessing directory '{self.directory}': {e}")
+        if self.data_format == 'hdf5':
+            return self._read_hdf5()
+        elif self.data_format == 'individual':
+            return self._read_individual()
+        else:
+            raise ValueError(f"Unknown data_format: {self.data_format}. Use 'HDF5' or 'Individual'.")
 
-    def read_saxs_file(self, file_name):
-        """
-        Read a SAXS data file.
+    def _read_hdf5(self):
+        result = {
+            'SAXS': {}, 'WAXS': {},
+            'TimeStamps_SAXS': {}, 'TimeStamps_WAXS': {},
+            'Legends': {},
+            'Electrochemical': None,
+            'Background_SAXS': None, 'Background_WAXS': None
+        }
 
-        Parameters:
-        file_name (str): The name of the SAXS file to read.
+        with h5py.File(self.data_path, 'r') as hdf5_file:
+            if 'SAXS' in hdf5_file:
+                for idx, key in enumerate(hdf5_file['SAXS'].keys(), start=1):
+                    result['SAXS'][idx] = pd.DataFrame(hdf5_file['SAXS'][key][:])
+                    result['TimeStamps_SAXS'][idx] = hdf5_file['SAXS'][key].attrs.get('timestamp')
+                    result['Legends'][idx] = f"SAXS_{idx}"
 
-        Returns:
-        DataFrame: DataFrame containing the SAXS data.
-        """
-        file_path = os.path.join(self.directory, file_name)
-        try:
-            with open(file_path, 'r') as file:
-                data_lines = []
-                data_storing = False
-                for line in file:
-                    if 'q(A-1)' in line:
-                        data_storing = True
-                        continue
-                    if data_storing:
-                        data_lines.append(line.strip())
-            data = pd.DataFrame([list(map(float, line.split())) for line in data_lines])
-            return data
-        except Exception as e:
-            raise ValueError(f"Error reading SAXS file '{file_name}': {e}")
+            if 'WAXS' in hdf5_file:
+                for idx, key in enumerate(hdf5_file['WAXS'].keys(), start=1):
+                    result['WAXS'][idx] = pd.DataFrame(hdf5_file['WAXS'][key][:])
+                    result['TimeStamps_WAXS'][idx] = hdf5_file['WAXS'][key].attrs.get('timestamp')
 
-    def read_waxs_file(self, file_name):
-        """
-        Read a WAXS data file.
+            if 'ElectrochemicalData' in hdf5_file:
+                if 'data' in hdf5_file['ElectrochemicalData']:
+                    result['Electrochemical'] = pd.DataFrame(hdf5_file['ElectrochemicalData']['data'][:])
 
-        Parameters:
-        file_name (str): The name of the WAXS file to read.
+            if 'Backgrounds' in hdf5_file:
+                if 'SAXS' in hdf5_file['Backgrounds']:
+                    for key in hdf5_file['Backgrounds']['SAXS'].keys():
+                        result['Background_SAXS'] = pd.DataFrame(hdf5_file['Backgrounds']['SAXS'][key][:])
+                if 'WAXS' in hdf5_file['Backgrounds']:
+                    for key in hdf5_file['Backgrounds']['WAXS'].keys():
+                        result['Background_WAXS'] = pd.DataFrame(hdf5_file['Backgrounds']['WAXS'][key][:])
 
-        Returns:
-        DataFrame: DataFrame containing the WAXS data.
-        """
-        file_path = os.path.join(self.directory, file_name)
-        try:
-            with open(file_path, 'r') as file:
-                data_lines = []
-                data_storing = False
-                for line in file:
-                    if 'q(A-1)' in line:
-                        data_storing = True
-                        continue
-                    if data_storing:
-                        data_lines.append(line.strip())
-            data = pd.DataFrame([list(map(float, line.split())) for line in data_lines])
-            return data
-        except Exception as e:
-            raise ValueError(f"Error reading WAXS file '{file_name}': {e}")
+        return result
 
-    def read_electrochemical_file(self, file_name):
-        """
-        Read an electrochemical data file (e.g., MPR files).
+    def _read_individual(self):
+        result = {
+            'SAXS': {}, 'WAXS': {},
+            'TimeStamps_SAXS': {}, 'TimeStamps_WAXS': {},
+            'Legends': {},
+            'Electrochemical': None,
+            'Background_SAXS': None, 'Background_WAXS': None
+        }
 
-        Parameters:
-        file_name (str): The name of the electrochemical file to read.
+        if not os.path.isdir(self.data_path):
+            raise NotADirectoryError(f"Data path is not a directory: {self.data_path}")
 
-        Returns:
-        DataFrame: DataFrame containing the electrochemical data.
-        """
-        file_path = os.path.join(self.directory, file_name)
-        try:
-            ec_data = BL.MPRfile(file_path)
-            data = pd.DataFrame(ec_data.data)
-            return data
-        except Exception as e:
-            raise ValueError(f"Error reading electrochemical file '{file_name}': {e}")
+        # Read SAXS files
+        saxs_files = sorted(glob.glob(os.path.join(self.data_path, '*_0_*.dat')))
+        for idx, file_path in enumerate(saxs_files, start=1):
+            legend, ts, df = self._read_individual_dat(file_path)
+            if df is not None:
+                result['SAXS'][idx] = df
+                result['TimeStamps_SAXS'][idx] = ts
+                result['Legends'][idx] = legend
 
-    def read_all_files(self):
-        """
-        Read all files in the directory and organize them into categories.
+        # Read WAXS files
+        waxs_files = sorted(glob.glob(os.path.join(self.data_path, '*_1_*.dat')))
+        for idx, file_path in enumerate(waxs_files, start=1):
+            legend, ts, df = self._read_individual_dat(file_path)
+            if df is not None:
+                result['WAXS'][idx] = df
+                result['TimeStamps_WAXS'][idx] = ts
 
-        Returns:
-        dict: A dictionary with keys 'SAXS', 'WAXS', 'Electrochemical', and 'Timestamps',
-              where:
-              - 'SAXS': DataFrames for SAXS files.
-              - 'WAXS': DataFrames for WAXS files.
-              - 'Electrochemical': DataFrames for electrochemical files.
-              - 'Timestamps': List of SAXS file timestamps.
-        """
-        all_data = {'SAXS': {}, 'WAXS': {}, 'Electrochemical': {}, 'Timestamps': []}
-        sax_count, wax_count, ec_count = 0, 0, 0
-
-        for file_name in self.list_files():
+        # Read Electrochemical MPR file
+        if self.mpr_file_path and os.path.isfile(self.mpr_file_path):
             try:
-                if "_0_" in file_name and file_name.endswith(".dat"):  # SAXS files
-                    # Extract timestamp
-                    file_path = os.path.join(self.directory, file_name)
-                    with open(file_path, 'r') as file:
-                        timestamp = None
-                        for line in file:
-                            if 'Date' in line:
-                                timestamp = datetime.strptime(line.split()[2], '%Y-%m-%dT%H:%M:%S')
-                                break
-                    # Read SAXS data
-                    data = self.read_saxs_file(file_name)
-                    all_data['SAXS'][sax_count] = data
-                    all_data['Timestamps'].append(timestamp)
-                    sax_count += 1
-                elif "_1_" in file_name and file_name.endswith(".dat"):  # WAXS files
-                    data = self.read_waxs_file(file_name)
-                    all_data['WAXS'][wax_count] = data
-                    wax_count += 1
-                elif file_name.endswith(".mpr"):  # Electrochemical files
-                    data = self.read_electrochemical_file(file_name)
-                    all_data['Electrochemical'][ec_count] = data
-                    ec_count += 1
+                mpr = BL.MPRfile(self.mpr_file_path)
+                result['Electrochemical'] = pd.DataFrame(mpr.data)
             except Exception as e:
-                print(f"Warning: Could not read file '{file_name}': {e}")
+                print(f"Warning: Could not read MPR file: {e}")
 
-        return all_data
+        return result
 
+def read_background_file(file_path):
+    """
+    Helper to read a single background/capillary file.
+    """
+    reader = DataReader('individual', '')
+    _, _, df = reader._read_individual_dat(file_path)
+    return df
+
+def read_background_directory(dir_path, pattern):
+    """
+    Helper to read a directory of background files matching a pattern.
+    Example pattern: '*_0_*.dat' for SAXS or '*_1_*.dat' for WAXS.
+    Returns a dictionary of {file_idx: DataFrame}.
+    """
+    if not dir_path or not os.path.isdir(dir_path):
+        return None
+        
+    result_dict = {}
+    reader = DataReader('individual', '')
+    files = sorted(glob.glob(os.path.join(dir_path, pattern)))
+    for idx, file_path in enumerate(files, start=1):
+        _, _, df = reader._read_individual_dat(file_path)
+        if df is not None:
+            result_dict[idx] = df
+            
+    return result_dict
