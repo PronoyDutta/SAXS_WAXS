@@ -290,7 +290,8 @@ def combined_contourplot(
     tick_label_color='black', tick_label_fontsize=12,
     colorbar_tick_size=5, colorbar_tick_label_fontsize=10,
     starting_file=1, last_file=None,
-    elec_df_2=None, applied_current=None, active_material_mass=None
+    elec_df_2=None, applied_current=None, active_material_mass=None,
+    discharge_files=None
 ):
     """
     Generates a combined contour plot for Electrochemical data, SAXS, and WAXS side-by-side.
@@ -432,6 +433,16 @@ def combined_contourplot(
         cbar_ax2 = fig.add_axes([0.68, 0.05, 0.22, 0.03])
         cb2 = fig.colorbar(contour_waxs, cax=cbar_ax2, orientation='horizontal')
         setup_cbar(cb2, waxs_cmap_min, waxs_cmap_max, False, 2, False, label_waxs)
+
+    if discharge_files is not None:
+        for d_file in discharge_files:
+            if starting_file <= d_file <= last_file:
+                idx = d_file - starting_file
+                d_y = y_data[idx]
+                if elec_df_2 is not None and not elec_df_2.empty:
+                    axs[0].axhline(y=d_y, color='r', linestyle='-.', linewidth=1.5)
+                axs[1].axhline(y=d_y, color='r', linestyle='-.', linewidth=1.5)
+                axs[2].axhline(y=d_y, color='r', linestyle='-.', linewidth=1.5)
 
     axs[0].tick_params(axis='both', labelsize=fntsize)
     axs[1].tick_params(axis='both', labelsize=fntsize)

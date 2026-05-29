@@ -86,8 +86,21 @@ def process_electrochemical_data(all_data, rate):
     print("Indices for cycle change:", cycle_change_index)
     print("\nAbsolute times for change in electrochemical state:")
     print(absolute_times_for_electrochemical_state_change)
-    print("\nCorresponding SAXS file numbers:")
+    print("Corresponding SAXS file numbers:")
     print(saxs_file_numbers)
+
+    # Identify discharge files by checking if voltage dropped during the state
+    discharge_saxs_files = []
+    for i in range(len(cycle_change_index) - 1):
+        start_idx = cycle_change_index[i]
+        end_idx = cycle_change_index[i+1]
+        start_v = elec_df.loc[start_idx, volt_col]
+        end_v = elec_df.loc[end_idx, volt_col]
+        if end_v < start_v:
+            discharge_saxs_files.append(saxs_file_numbers[i+1])
+    
+    print("\nIdentified discharge end SAXS files:")
+    print(discharge_saxs_files)
 
     # Plot the electrochemical data
     Elec_Xdata = elec_df[time_col]
@@ -111,6 +124,7 @@ def process_electrochemical_data(all_data, rate):
         "cycle_change_indices": cycle_change_index,
         "absolute_times_for_state_changes": absolute_times_for_electrochemical_state_change,
         "saxs_file_numbers": saxs_file_numbers,
+        "discharge_saxs_files": discharge_saxs_files,
         "applied_current": applied_current,
         "active_material_mass": active_material_mass,
     }
