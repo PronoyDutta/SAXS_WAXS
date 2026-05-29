@@ -105,7 +105,12 @@ class DataReader:
 
             if 'ElectrochemicalData' in hdf5_file:
                 if 'data' in hdf5_file['ElectrochemicalData']:
-                    result['Electrochemical'] = pd.DataFrame(hdf5_file['ElectrochemicalData']['data'][:])
+                    elec_data = hdf5_file['ElectrochemicalData']['data'][:]
+                    if 'headers' in hdf5_file['ElectrochemicalData']:
+                        headers = [h.decode('utf-8') for h in hdf5_file['ElectrochemicalData']['headers'][:]]
+                        result['Electrochemical'] = pd.DataFrame(elec_data, columns=headers)
+                    else:
+                        result['Electrochemical'] = pd.DataFrame(elec_data)
 
             if 'Backgrounds' in hdf5_file:
                 if 'SAXS' in hdf5_file['Backgrounds']:

@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from datetime import datetime
 from scipy.signal import savgol_filter
 import matplotlib.pyplot as plt
@@ -53,6 +54,33 @@ def contourplot(
 ):
     """
     Generates a contour plot for SAXS/WAXS data correlated with electrochemical data.
+    
+    Parameters:
+    - plot_type (str): Type of plot, options are 'saxs' or 'waxs'.
+    - data_normalization (str): Normalization method, options are 'absolute' or 'relative'.
+    - data_dictionary (dict): Dictionary mapping file numbers to data DataFrames.
+    - new_time_dict (dict): Dictionary mapping file numbers to timestamps.
+    - min_limit (float): Minimum limit for the x-axis (q or 2θ).
+    - max_limit (float): Maximum limit for the x-axis (q or 2θ).
+    - cmap_min (float, optional): Minimum value for the color scale. Default is None (auto).
+    - cmap_max (float, optional): Maximum value for the color scale. Default is None (auto).
+    - Normalization_file (int, optional): The file index to normalize against when data_normalization='relative' (e.g., discharge_file or starting_file).
+    - save_plot (bool): Whether to save the plot to a file, options are True or False.
+    - filename (str): Default filename to save the plot as.
+    - decimal_points (int): Number of decimal points for the colorbar ticks.
+    - scientific (bool): Whether to use scientific notation for the colorbar, options are True or False.
+    - y_axis_mode (str): The value to plot on the Y-axis, options are 'time' or 'capacity'.
+    - inset_colorbar_inside (bool): Whether to draw the side colorbar inside the plot area, options are True or False.
+    - colorbar_position (str): Position of the colorbar, options are 'bottom' or 'side'.
+    - tick_label_color (str): Color of the colorbar tick labels (e.g., 'black', 'white').
+    - tick_label_fontsize (int): Font size for the colorbar labels.
+    - colorbar_tick_size (int): Length of the colorbar ticks.
+    - colorbar_tick_label_fontsize (int): Font size for the colorbar tick text.
+    - starting_file (int): The starting file index to begin plotting from.
+    - last_file (int, optional): The ending file index to plot up to. Default is None (uses max index).
+    - elec_df_2 (DataFrame, optional): Filtered electrochemical dataframe for the left-side subplot.
+    - applied_current (float, optional): Applied current in mA (required if y_axis_mode='capacity').
+    - active_material_mass (float, optional): Active material mass in mg (required if y_axis_mode='capacity').
     """
     if last_file is None:
         last_file = max(data_dictionary.keys())
@@ -78,6 +106,14 @@ def contourplot(
     X1_data_filtered_positions = X1_data_temp.iloc[indices_within_range]
     start_row = np.min(indices_within_range)
     end_row = np.max(indices_within_range)
+    
+    # Check if new_time_dict contains raw timestamps (strings/bytes) or elapsed seconds (floats)
+    is_raw_timestamps = isinstance(keys[0], (int, np.integer)) and isinstance(new_time_dict[keys[0]], (str, bytes))
+    
+    if is_raw_timestamps:
+        val0 = new_time_dict[starting_file]
+        if isinstance(val0, bytes): val0 = val0.decode('utf-8')
+        base_time = datetime.strptime(str(val0), '%Y-%m-%dT%H:%M:%S')
 
     # Process data matrices
     for file_number in range(starting_file, last_file + 1):
@@ -89,7 +125,15 @@ def contourplot(
         Intensity_list.append(norm_intensity.to_numpy())
         
         # Calculate time elapsed
-        time_elapsed = float(keys[file_number - 1] - keys[starting_file - 1])
+        if is_raw_timestamps:
+            val = new_time_dict[file_number]
+            if isinstance(val, bytes): val = val.decode('utf-8')
+            current_time = datetime.strptime(str(val), '%Y-%m-%dT%H:%M:%S')
+            time_elapsed = (current_time - base_time).total_seconds()
+        else:
+            # Legacy format where keys are ordered elapsed seconds
+            time_elapsed = float(keys[file_number - 1] - keys[starting_file - 1])
+            
         time_t1.append(time_elapsed)
 
     time_hours = np.array(time_t1) / 3600
@@ -197,3 +241,219 @@ def contourplot(
             plt.savefig(filename, dpi=600)
 
     plt.show()
+
+def subtract_background(data_dict, background_df, align_target_X=None):
+    """
+    Subtracts a background DataFrame from a dictionary of data DataFrames.
+    If align_target_X is provided (e.g., 3.4 for WAXS), it interpolates the 
+    background to align with the data at that specific target X value before subtracting.
+    """
+    if background_df is None or background_df.empty:
+        print("No background data provided.")
+        return data_dict
+        
+    corrected_dict = {}
+    for key in data_dict:
+        X_data = data_dict[key].iloc[:, 0]
+        Y_data = data_dict[key].iloc[:, 1]
+        
+        if align_target_X is not None:
+            # Interpolate to align background vertically with the signal
+            if X_data.min() <= align_target_X <= X_data.max():
+                Y_value_at_target = np.interp(align_target_X, X_data, Y_data)
+                background_Y_value_at_target = np.interp(align_target_X, background_df.iloc[:, 0], background_df.iloc[:, 1])
+                offset = Y_value_at_target - background_Y_value_at_target
+                aligned_background_Y = background_df.iloc[:, 1] + offset
+                modified_Y = Y_data - aligned_background_Y
+            else:
+                print(f"Target X {align_target_X} is out of bounds for file {key}")
+                modified_Y = Y_data - background_df.iloc[:len(Y_data), 1].values
+        else:
+            # Direct subtraction
+            end_line = min(len(Y_data), len(background_df))
+            modified_Y = Y_data.iloc[:end_line] - background_df.iloc[:end_line, 1].values
+            X_data = X_data.iloc[:end_line]
+            
+        df = pd.DataFrame({0: X_data.values, 1: modified_Y.values})
+        corrected_dict[key] = df
+        
+    return corrected_dict
+
+def combined_contourplot(
+    saxs_data_normalization, waxs_data_normalization, saxs_dict, waxs_dict, new_time_dict,
+    saxs_min_limit, saxs_max_limit, waxs_min_limit, waxs_max_limit,
+    saxs_cmap_min=None, saxs_cmap_max=None, waxs_cmap_min=None, waxs_cmap_max=None,
+    Normalization_file_saxs=None, Normalization_file_waxs=None,
+    save_plot=False, filename="combined_contour_plot.png",
+    decimal_points=2, scientific=False, y_axis_mode='time',
+    colorbar_position='bottom', inset_colorbar_inside=True,
+    tick_label_color='black', tick_label_fontsize=12,
+    colorbar_tick_size=5, colorbar_tick_label_fontsize=10,
+    starting_file=1, last_file=None,
+    elec_df_2=None, applied_current=None, active_material_mass=None
+):
+    """
+    Generates a combined contour plot for Electrochemical data, SAXS, and WAXS side-by-side.
+    """
+    if last_file is None:
+        last_file = max(saxs_dict.keys())
+        
+    wavelength_nm = 0.154  # Cu K-alpha wavelength in nm
+    fntsize = 16
+    plt.style.use('default')
+
+    keys = list(new_time_dict.keys())
+    time_t1 = []
+    
+    is_raw_timestamps = isinstance(keys[0], (int, np.integer)) and isinstance(new_time_dict[keys[0]], (str, bytes))
+    if is_raw_timestamps:
+        val0 = new_time_dict[starting_file]
+        if isinstance(val0, bytes): val0 = val0.decode('utf-8')
+        base_time = datetime.strptime(str(val0), '%Y-%m-%dT%H:%M:%S')
+
+    def get_grid(data_dictionary, min_limit, max_limit, normalization_type, is_waxs=False, norm_file=None):
+        X1_data_temp = 10 * data_dictionary[starting_file].iloc[:, 0]
+        if is_waxs:
+            X1_data_temp = 2 * np.degrees(np.arcsin((wavelength_nm * X1_data_temp) / (4 * np.pi)))
+            
+        indices = np.where((X1_data_temp >= min_limit) & (X1_data_temp <= max_limit))
+        X1_filtered = X1_data_temp.iloc[indices]
+        start_row, end_row = np.min(indices), np.max(indices)
+        
+        Intensity_list = []
+        for file_number in range(starting_file, last_file + 1):
+            if normalization_type == 'relative' and norm_file is not None:
+                norm_intensity = data_dictionary[file_number].iloc[start_row:end_row + 1, 1] / data_dictionary[norm_file].iloc[start_row:end_row + 1, 1]
+            else:
+                norm_intensity = data_dictionary[file_number].iloc[start_row:end_row + 1, 1]
+            Intensity_list.append(norm_intensity.to_numpy())
+            
+        normIntensity_array = np.array(Intensity_list)
+        return X1_filtered, gaussian_filter(normIntensity_array, sigma=1)
+
+    X_saxs, Z_saxs = get_grid(saxs_dict, saxs_min_limit, saxs_max_limit, saxs_data_normalization, is_waxs=False, norm_file=Normalization_file_saxs)
+    X_waxs, Z_waxs = get_grid(waxs_dict, waxs_min_limit, waxs_max_limit, waxs_data_normalization, is_waxs=True, norm_file=Normalization_file_waxs)
+    
+    for file_number in range(starting_file, last_file + 1):
+        if is_raw_timestamps:
+            val = new_time_dict[file_number]
+            if isinstance(val, bytes): val = val.decode('utf-8')
+            current_time = datetime.strptime(str(val), '%Y-%m-%dT%H:%M:%S')
+            time_t1.append((current_time - base_time).total_seconds())
+        else:
+            time_t1.append(float(keys[file_number - 1] - keys[starting_file - 1]))
+
+    if y_axis_mode == 'capacity' and applied_current and active_material_mass:
+        y_data = (np.array(time_t1) * applied_current) / (active_material_mass * 3.6)
+        y_label = 'Specific Capacity (mAh g$^{-1}$)'
+    else:
+        y_data = np.array(time_t1) / 3600
+        y_label = 'Time (h)'
+
+    X1, Y1 = np.meshgrid(X_saxs, y_data)
+    X2, Y2 = np.meshgrid(X_waxs, y_data)
+    
+    cmap1 = plt.colormaps.get_cmap('viridis')
+
+    fig, axs = plt.subplots(1, 3, figsize=(12, 6), sharey=True, gridspec_kw={'width_ratios': [2.0, 3, 3]})
+
+    if elec_df_2 is not None and not elec_df_2.empty:
+        if 'time/s' in elec_df_2.columns and 'Ewe/V' in elec_df_2.columns:
+            time_col, volt_col = elec_df_2['time/s'], elec_df_2['Ewe/V']
+        elif 6 in elec_df_2.columns and 2 in elec_df_2.columns:
+            volt_col, time_col = elec_df_2[6], elec_df_2[2]
+        else:
+            time_col, volt_col = elec_df_2.iloc[:, 0], elec_df_2.iloc[:, 1]
+            
+        if y_axis_mode == 'capacity' and applied_current and active_material_mass:
+            left_y = ((time_col - time_col.iloc[0]) * applied_current) / (active_material_mass * 3.6)
+        else:
+            left_y = (time_col - time_col.iloc[0]) / 3600
+        axs[0].plot(volt_col, left_y, color='r')
+        axs[0].set_ylim(left_y.min(), left_y.max())
+    
+    axs[0].invert_xaxis()
+    axs[0].set_ylabel(y_label, fontsize=fntsize)
+    axs[0].set_xlabel('Potential (V)', fontsize=fntsize)
+
+    axs[1].set_title('SAXS', fontsize=fntsize, fontweight='bold', loc='left')
+    contour_saxs = axs[1].contourf(X1, Y1, Z_saxs, cmap=cmap1, vmin=saxs_cmap_min, vmax=saxs_cmap_max)
+    axs[1].set_xlabel('q (nm$^{-1}$)', fontsize=fntsize)
+    axs[1].set_xscale('log')
+    axs[1].xaxis.set_major_formatter(mticker.ScalarFormatter())
+    ticks = [saxs_min_limit] + list(range(int(np.ceil(saxs_min_limit)), int(saxs_max_limit) + 1, 2))
+    axs[1].set_xticks(ticks)
+    axs[1].set_xticklabels([f'{tick:.1f}' for tick in ticks], fontsize=fntsize)
+
+    axs[2].set_title('WAXS', fontsize=fntsize, fontweight='bold', loc='left')
+    contour_waxs = axs[2].contourf(X2, Y2, Z_waxs, cmap=cmap1, vmin=waxs_cmap_min, vmax=waxs_cmap_max)
+    axs[2].set_xlabel('2θ (°)', fontsize=fntsize)
+
+    label_saxs = 'rel. Intensity' if saxs_data_normalization == 'relative' else 'Intensity (a.u.)'
+    label_waxs = 'rel. Intensity' if waxs_data_normalization == 'relative' else 'Intensity (a.u.)'
+    
+    def setup_cbar(cbar, cbar_min, cbar_max, is_side, ax_idx, is_inset, label_text):
+        cbar_min = cbar_min if cbar_min is not None else (Z_saxs.min() if ax_idx==1 else Z_waxs.min())
+        cbar_max = cbar_max if cbar_max is not None else (Z_saxs.max() if ax_idx==1 else Z_waxs.max())
+        cbar_mid = (cbar_min + cbar_max) / 2
+        cbar.set_ticks([cbar_min, cbar_mid, cbar_max])
+        if scientific:
+            factor = 1e4
+            cbar.set_ticklabels([f"{cbar_min*factor:.{decimal_points}f}", f"{cbar_mid*factor:.{decimal_points}f}", f"{cbar_max*factor:.{decimal_points}f}"])
+        else:
+            cbar.set_ticklabels([f"{cbar_min:.{decimal_points}f}", f"{cbar_mid:.{decimal_points}f}", f"{cbar_max:.{decimal_points}f}"])
+            
+        if is_side:
+            cbar.ax.tick_params(direction='out', length=colorbar_tick_size, labelsize=colorbar_tick_label_fontsize,
+                                color=tick_label_color, labelcolor=tick_label_color)
+            if is_inset:
+                cbar.ax.set_title(label_text, fontsize=colorbar_tick_label_fontsize, color='black', pad=10)
+        else:
+            cbar.ax.tick_params(direction='out', length=colorbar_tick_size, labelsize=tick_label_fontsize)
+            cbar.set_label(label_text, fontsize=fntsize)
+
+    if colorbar_position == 'side' and inset_colorbar_inside:
+        for ax_idx, contour, cmin, cmax, label_text in [(1, contour_saxs, saxs_cmap_min, saxs_cmap_max, label_saxs), (2, contour_waxs, waxs_cmap_min, waxs_cmap_max, label_waxs)]:
+            # Anchor OUTSIDE the plot to the right, pushing it a bit further to make room for left-ticks
+            inset_ax = inset_axes(axs[ax_idx], width="5%", height="40%", loc='lower left', bbox_to_anchor=(1.15, 0.6, 1, 1), bbox_transform=axs[ax_idx].transAxes, borderpad=0)
+            cb = fig.colorbar(contour, cax=inset_ax)
+            cb.ax.tick_params(labelleft=True, labelright=False, right=False, left=True)
+            setup_cbar(cb, cmin, cmax, True, ax_idx, True, label_text)
+    elif colorbar_position == 'side':
+        for ax_idx, contour, cmin, cmax, label_text in [(1, contour_saxs, saxs_cmap_min, saxs_cmap_max, label_saxs), (2, contour_waxs, waxs_cmap_min, waxs_cmap_max, label_waxs)]:
+            cb = fig.colorbar(contour, ax=axs[ax_idx])
+            cb.ax.tick_params(labelleft=True, labelright=False, right=False, left=True)
+            setup_cbar(cb, cmin, cmax, True, ax_idx, False, label_text)
+    else:
+        cbar_ax1 = fig.add_axes([0.38, 0.05, 0.22, 0.03])
+        cb1 = fig.colorbar(contour_saxs, cax=cbar_ax1, orientation='horizontal')
+        setup_cbar(cb1, saxs_cmap_min, saxs_cmap_max, False, 1, False, label_saxs)
+        
+        cbar_ax2 = fig.add_axes([0.68, 0.05, 0.22, 0.03])
+        cb2 = fig.colorbar(contour_waxs, cax=cbar_ax2, orientation='horizontal')
+        setup_cbar(cb2, waxs_cmap_min, waxs_cmap_max, False, 2, False, label_waxs)
+
+    axs[0].tick_params(axis='both', labelsize=fntsize)
+    axs[1].tick_params(axis='both', labelsize=fntsize)
+    axs[2].tick_params(axis='both', labelsize=fntsize)
+    
+    if colorbar_position == 'bottom':
+        fig.subplots_adjust(wspace=0.1, left=0.1, right=0.95, top=0.9, bottom=0.25)
+    else:
+        # Give more right padding for the outside colorbars
+        fig.subplots_adjust(wspace=0.25, left=0.1, right=0.92, top=0.9, bottom=0.15)
+
+    if save_plot:
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            save_path = filedialog.asksaveasfilename(defaultextension=".png", initialfile=filename, filetypes=[("PNG files", "*.png")])
+            if save_path:
+                plt.savefig(save_path, dpi=600)
+                print(f"Plot saved to {save_path}")
+        except Exception as e:
+            print(f"Could not open save dialog, saving to current directory as {filename}")
+            plt.savefig(filename, dpi=600)
+
+    plt.show()
+
