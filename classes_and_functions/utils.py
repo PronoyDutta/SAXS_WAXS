@@ -355,7 +355,7 @@ def combined_contourplot(
     
     cmap1 = plt.colormaps.get_cmap('viridis')
 
-    fig, axs = plt.subplots(1, 3, figsize=(12, 6), sharey=True, gridspec_kw={'width_ratios': [2.0, 3, 3]})
+    fig, axs = plt.subplots(1, 3, figsize=(12, 6), sharey=True, gridspec_kw={'width_ratios': [1.5, 3, 3]})
 
     if elec_df_2 is not None and not elec_df_2.empty:
         if 'time/s' in elec_df_2.columns and 'Ewe/V' in elec_df_2.columns:
@@ -376,7 +376,7 @@ def combined_contourplot(
     axs[0].set_ylabel(y_label, fontsize=fntsize)
     axs[0].set_xlabel('Potential (V)', fontsize=fntsize)
 
-    axs[1].set_title('SAXS', fontsize=fntsize, fontweight='bold', loc='left')
+    axs[1].set_title('SAXS', fontsize=fntsize, fontweight='bold', loc='center')
     contour_saxs = axs[1].contourf(X1, Y1, Z_saxs, cmap=cmap1, vmin=saxs_cmap_min, vmax=saxs_cmap_max)
     axs[1].set_xlabel('q (nm$^{-1}$)', fontsize=fntsize)
     axs[1].set_xscale('log')
@@ -385,7 +385,7 @@ def combined_contourplot(
     axs[1].set_xticks(ticks)
     axs[1].set_xticklabels([f'{tick:.1f}' for tick in ticks], fontsize=fntsize)
 
-    axs[2].set_title('WAXS', fontsize=fntsize, fontweight='bold', loc='left')
+    axs[2].set_title('WAXS', fontsize=fntsize, fontweight='bold', loc='center')
     contour_waxs = axs[2].contourf(X2, Y2, Z_waxs, cmap=cmap1, vmin=waxs_cmap_min, vmax=waxs_cmap_max)
     axs[2].set_xlabel('2θ (°)', fontsize=fntsize)
 
