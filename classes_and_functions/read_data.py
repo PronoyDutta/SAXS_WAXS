@@ -6,6 +6,14 @@ from datetime import datetime
 import h5py
 from galvani import BioLogic as BL
 
+def _resolve_path(path):
+    if not path or pd.isna(path):
+        return path
+    if not os.path.isabs(path):
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.normpath(os.path.join(repo_root, path))
+    return path
+
 class DataReader:
     """
     A unified class to read and process SAXS, WAXS, and electrochemical data files.
@@ -20,8 +28,8 @@ class DataReader:
         - mpr_file_path (str): Path to the .mpr file (only needed if data_format is 'Individual')
         """
         self.data_format = data_format.lower()
-        self.data_path = data_path
-        self.mpr_file_path = mpr_file_path
+        self.data_path = _resolve_path(data_path)
+        self.mpr_file_path = _resolve_path(mpr_file_path)
 
     def _read_individual_dat(self, file_path):
         legend_temp = None
@@ -165,6 +173,7 @@ def read_background_file(file_path):
     """
     Helper to read a single background/capillary file.
     """
+    file_path = _resolve_path(file_path)
     reader = DataReader('individual', '')
     _, _, df = reader._read_individual_dat(file_path)
     return df
@@ -175,6 +184,7 @@ def read_background_directory(dir_path, pattern):
     Example pattern: '*_0_*.dat' for SAXS or '*_1_*.dat' for WAXS.
     Returns a dictionary of {file_idx: DataFrame}.
     """
+    dir_path = _resolve_path(dir_path)
     if not dir_path or not os.path.isdir(dir_path):
         return None
         
