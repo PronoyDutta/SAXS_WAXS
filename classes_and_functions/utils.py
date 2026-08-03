@@ -618,13 +618,20 @@ def plot_2d_waterfall(
 
     plt.show()
 
-def plot_selected_curves(data_dict, file_numbers, is_waxs=False, q_min=None, q_max=None, apply_smoothing=False, window_length=15, polyorder=3):
+def plot_selected_curves(data_dict, file_numbers, is_waxs=False, q_min=None, q_max=None, 
+                         apply_smoothing=False, smoothing_method='savgol', 
+                         window_length=15, polyorder=3, gaussian_sigma=2.0):
     """
     Plots specific curves by their file numbers from a given data dictionary.
+    
+    smoothing_method: 'savgol', 'gaussian', or 'moving_average'
+    window_length: Used for savgol and moving_average. Must be odd.
+    gaussian_sigma: Standard deviation for Gaussian kernel. Higher = more smoothing.
     """
     import matplotlib.pyplot as plt
     import numpy as np
     from scipy.signal import savgol_filter
+    from scipy.ndimage import gaussian_filter1d
     
     plt.figure(figsize=(8, 6))
     wavelength = 0.15406  # Cu K-alpha in nm
@@ -652,8 +659,16 @@ def plot_selected_curves(data_dict, file_numbers, is_waxs=False, q_min=None, q_m
             x_plot = x_plot[valid_idx]
             y_data = y_data[valid_idx]
             
-        if apply_smoothing and len(y_data) > window_length:
-            y_plot = savgol_filter(y_data, window_length, polyorder)
+        if apply_smoothing:
+            if smoothing_method == 'savgol' and len(y_data) > window_length:
+                y_plot = savgol_filter(y_data, window_length, polyorder)
+            elif smoothing_method == 'gaussian':
+                y_plot = gaussian_filter1d(y_data, sigma=gaussian_sigma)
+            elif smoothing_method == 'moving_average':
+                window = np.ones(window_length) / window_length
+                y_plot = np.convolve(y_data, window, mode='same')
+            else:
+                y_plot = y_data
         else:
             y_plot = y_data
             
