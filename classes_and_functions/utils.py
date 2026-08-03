@@ -468,3 +468,207 @@ def combined_contourplot(
 
     plt.show()
 
+def q_to_two_theta(q_values, wavelength=0.15406):
+    return 2 * np.degrees(np.arcsin((q_values * wavelength) / (4 * np.pi)))
+
+def plot_3d_waterfall(
+    data_dictionary, starting_file, last_file, discharge_file=None,
+    q_min=16.9, q_max=19.8, offset_increment=0.000002,
+    wavelength=0.15406, transparency=0.8,
+    save_plot=False, filename="3D_Waterfall_Plot.png"
+):
+    """
+    Generates a 3D waterfall plot for WAXS data.
+    """
+    from mpl_toolkits.mplot3d import Axes3D
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    plt.title("3D Waterfall Plot of Filtered WAXS Data")
+
+    base_offset = 0.0
+    
+    keys = list(range(starting_file, last_file + 1, 2))
+    keys.reverse()
+    
+    if discharge_file is not None and discharge_file not in keys:
+        keys.append(discharge_file)
+        keys = sorted(keys, reverse=True)
+        
+    for ikey in keys:
+        if ikey not in data_dictionary:
+            continue
+            
+        original_q = 10 * data_dictionary[ikey].iloc[:, 0]
+        original_Y = data_dictionary[ikey].iloc[:, 1]
+        
+        converted_two_theta = q_to_two_theta(original_q, wavelength)
+        
+        filtered_indices = (original_q >= q_min) & (original_q <= q_max)
+        filtered_two_theta = converted_two_theta[filtered_indices]
+        filtered_Y = original_Y[filtered_indices]
+        
+        offset = base_offset + (ikey - starting_file) * offset_increment
+        Z = np.full_like(filtered_two_theta, offset)
+        
+        if discharge_file is not None and ikey == discharge_file:
+            ax.plot(filtered_two_theta, Z, filtered_Y, color='black', linewidth=2.5, alpha=transparency)
+        else:
+            color = plt.cm.jet((ikey - starting_file) / max(1, last_file - starting_file))
+            ax.plot(filtered_two_theta, Z, filtered_Y, color=color, alpha=transparency)
+
+    ax.set_xlabel('2θ (degrees)', fontsize=16)
+    ax.tick_params(axis='x', labelsize=16)
+    ax.set_yticks([])
+    ax.set_zticks([])
+    ax.set_zlabel('Intensity (a.u.)', fontsize=16)
+    
+    if discharge_file is not None:
+        ax.plot([], [], [], color='black', linewidth=2.5, label=f'Discharge (File {discharge_file})')
+        ax.legend(loc="upper right")
+
+    ax.view_init(elev=18, azim=-106)
+    plt.tight_layout()
+    
+    if save_plot:
+        plt.savefig(filename, dpi=600)
+        print(f"Plot saved as {filename}")
+        
+    plt.show()
+
+def plot_2d_waterfall(
+    data_dictionary, starting_file, discharge_file,
+    q_min=16.96, q_max=21.12, intensity_min=0, intensity_max=0.02,
+    offset_increment=0.00001, wavelength=0.15406,
+    highlight_file=None, save_plot=False, filename="2D_Waterfall_Plot.png"
+):
+    """
+    Generates a 2D stacked waterfall plot for WAXS data with fading colors.
+    """
+    from matplotlib.colors import Normalize
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+    if highlight_file is None:
+        highlight_file = starting_file
+
+    fig, ax = plt.subplots(figsize=(5,4))
+
+    keys = list(range(starting_file, discharge_file + 1))
+    
+    if discharge_file not in keys:
+        keys.append(discharge_file)
+        keys = sorted(keys, reverse=False)
+
+    num_curves = len(keys)
+    cmap = plt.colormaps.get_cmap('Blues')
+    norm_discharging = Normalize(vmin=starting_file, vmax=discharge_file + 1)
+    
+    for idx, ikey in enumerate(keys):
+        if ikey not in data_dictionary:
+            continue
+            
+        original_q = 10 * data_dictionary[ikey].iloc[:, 0]
+        original_Y = data_dictionary[ikey].iloc[:, 1]
+
+        converted_two_theta = q_to_two_theta(original_q, wavelength)
+
+        valid_indices = (original_q >= q_min) & (original_q <= q_max) & (original_Y >= intensity_min) & (original_Y <= intensity_max)
+        filtered_two_theta = converted_two_theta[valid_indices]
+        filtered_Y = original_Y[valid_indices]
+
+        if len(filtered_Y) > 7:
+            smoothed_Y = savgol_filter(filtered_Y, window_length=20, polyorder=3) * 1000
+        else:
+            smoothed_Y = filtered_Y * 1000
+
+        offset = idx * offset_increment
+
+        if ikey == highlight_file:
+            if len(filtered_Y) > 10:
+                ax.plot(filtered_two_theta, savgol_filter(filtered_Y, window_length=10, polyorder=2) * 1000 + offset, color='black', linewidth=2.5, alpha=0.2)
+            else:
+                ax.plot(filtered_two_theta, filtered_Y * 1000 + offset, color='black', linewidth=2.5, alpha=0.2)
+        else:
+            color_idx = idx / max(1, num_curves)
+            ax.plot(filtered_two_theta, smoothed_Y + offset, color=cmap(color_idx), alpha=0.9)
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm_discharging)
+    sm.set_array([])
+
+    axins = inset_axes(ax, width="3%", height="20%", loc='upper right',
+                       bbox_to_anchor=(0, 0, 0.95, 0.95),
+                       bbox_transform=ax.transAxes, borderpad=0)
+
+    cbar = plt.colorbar(sm, cax=axins)
+    cbar.set_ticks([])
+
+    ax.set_xlim(24, 28)
+    ax.set_xlabel('2θ (°)', fontsize=18)
+    ax.set_ylabel('Intensity (a.u.)', fontsize=18)
+
+    ax.yaxis.tick_right()
+    ax.yaxis.set_label_position("right")
+    ax.tick_params(axis='both', labelsize=18) 
+
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.1f}"))
+
+    plt.tight_layout()
+    if save_plot:
+        plt.savefig(filename, dpi=600)
+        print(f"Plot saved as {filename}")
+
+    plt.show()
+
+def plot_selected_curves(data_dict, file_numbers, is_waxs=False, q_min=None, q_max=None, apply_smoothing=False, window_length=15, polyorder=3):
+    """
+    Plots specific curves by their file numbers from a given data dictionary.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from scipy.signal import savgol_filter
+    
+    plt.figure(figsize=(8, 6))
+    wavelength = 0.15406  # Cu K-alpha in nm
+    
+    for f_num in file_numbers:
+        if f_num not in data_dict:
+            print(f"Warning: File {f_num} not found in the dictionary.")
+            continue
+            
+        df = data_dict[f_num]
+        x_data = df.iloc[:, 0] * 10  # Convert q to nm^-1
+        y_data = df.iloc[:, 1]
+        
+        # Format the X-axis depending on if it is WAXS or SAXS
+        if is_waxs:
+            x_plot = 2 * np.degrees(np.arcsin((x_data * wavelength) / (4 * np.pi)))
+            x_label = '2θ (°)'
+        else:
+            x_plot = x_data
+            x_label = 'q (nm$^{-1}$)'
+            
+        # Optional cropping limits
+        if q_min is not None and q_max is not None:
+            valid_idx = (x_data >= q_min) & (x_data <= q_max)
+            x_plot = x_plot[valid_idx]
+            y_data = y_data[valid_idx]
+            
+        if apply_smoothing and len(y_data) > window_length:
+            y_plot = savgol_filter(y_data, window_length, polyorder)
+        else:
+            y_plot = y_data
+            
+        plt.plot(x_plot, y_plot, label=f'File {f_num}')
+        
+    if not is_waxs:
+        plt.xscale('log')
+        plt.yscale('log')
+        plt.title('Selected SAXS Curves', fontsize=16)
+    else:
+        plt.title('Selected WAXS Curves', fontsize=16)
+        
+    plt.xlabel(x_label, fontsize=14)
+    plt.ylabel('Intensity (a.u.)', fontsize=14)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
