@@ -192,13 +192,19 @@ def interactive_fit_viewer(data_dict, df_curves, file_numbers, mean_positions, m
                 center = df_curves.loc[file_key, f"Peak_{i+1}_Center"]
                 fwhm = df_curves.loc[file_key, f"Peak_{i+1}_FWHM"]
                 amp = df_curves.loc[file_key, f"Peak_{i+1}_Amplitude"]
+                
+                # Try to get error for labeling, default to NaN if not present
+                try:
+                    fwhm_err = df_curves.loc[file_key, f"Peak_{i+1}_FWHM error"]
+                except KeyError:
+                    fwhm_err = float('nan')
 
                 # Individual peak without baseline for the total sum, but plot with baseline for visualization
                 y_peak = lorentzian(x, amp, center, fwhm, 0)
                 y_fit_total += y_peak
                 
                 y_fit_plot = y_peak + baseline
-                plt.plot(x, y_fit_plot, '--', label=f'Peak {i+1} Fit (q={center:.2f})')
+                plt.plot(x, y_fit_plot, '--', label=f'Peak {i+1} Fit (q={center:.2f}, Err={fwhm_err:.3f})')
             except KeyError:
                 continue
 
@@ -212,9 +218,10 @@ def interactive_fit_viewer(data_dict, df_curves, file_numbers, mean_positions, m
 
     interact(plot_overlay, file_key=IntSlider(min=min(valid_files), max=max(valid_files), step=1, description='File Key', value=min(valid_files)))
 
-def plot_peak_areas(df_curves, window_length=15, smoothing_method='savgol', polyorder=3, gaussian_sigma=3.0):
+def plot_peak_areas(df_curves, window_length=15, smoothing_method='savgol', polyorder=3, gaussian_sigma=3.0, filter_error_threshold=1.0):
     import matplotlib.pyplot as plt
     import pandas as pd
+    import numpy as np
     from scipy.signal import savgol_filter
     from scipy.ndimage import gaussian_filter1d
     
@@ -228,26 +235,41 @@ def plot_peak_areas(df_curves, window_length=15, smoothing_method='savgol', poly
         return
         
     for col in area_cols:
+        # Create a working copy of the series
+        y_series = df_curves[col].copy()
+        
+        # Filter out fits with high error if the threshold is provided
+        if filter_error_threshold is not None:
+            err_col = col.replace('Area', 'FWHM error')
+            if err_col in df_curves.columns:
+                high_error_mask = df_curves[err_col] > filter_error_threshold
+                y_series.loc[high_error_mask] = np.nan
+                
         if window_length > 1:
             # Plot raw data as faint points
-            plt.plot(df_curves.index, df_curves[col], marker='o', linestyle='', alpha=0.3, color='tab:blue', label=f"{col.replace('_', ' ')} (Raw)")
+            plt.plot(df_curves.index, y_series, marker='o', linestyle='', alpha=0.3, color='tab:blue', label=f"{col.replace('_', ' ')} (Raw)")
             
             # Apply chosen smoothing method
-            y_raw = df_curves[col].fillna(0).values
+            # For rolling window methods, keeping NaNs is usually fine as long as min_periods=1,
+            # but for savgol/gaussian, NaNs will cause issues. We interpolate or fill for the smoothing layer.
+            y_raw_for_smooth = y_series.interpolate(method='linear').fillna(0).values
+            
             if smoothing_method == 'savgol':
                 # savgol requires window_length to be odd
                 wl = window_length if window_length % 2 != 0 else window_length + 1
-                smoothed = savgol_filter(y_raw, window_length=wl, polyorder=polyorder)
+                smoothed = savgol_filter(y_raw_for_smooth, window_length=wl, polyorder=polyorder)
             elif smoothing_method == 'gaussian':
-                smoothed = gaussian_filter1d(y_raw, sigma=gaussian_sigma)
+                smoothed = gaussian_filter1d(y_raw_for_smooth, sigma=gaussian_sigma)
             elif smoothing_method == 'moving_average':
-                smoothed = df_curves[col].rolling(window=window_length, center=True, min_periods=1).mean().values
+                smoothed = y_series.rolling(window=window_length, center=True, min_periods=1).mean().values
+            elif smoothing_method == 'moving_median':
+                smoothed = y_series.rolling(window=window_length, center=True, min_periods=1).median().values
             else:
-                smoothed = y_raw
+                smoothed = y_raw_for_smooth
                 
             plt.plot(df_curves.index, smoothed, linestyle='-', linewidth=2, color='tab:red', label=f"{col.replace('_', ' ')} (Trend - {smoothing_method})")
         else:
-            plt.plot(df_curves.index, df_curves[col], marker='o', linestyle='-', label=col.replace('_', ' '))
+            plt.plot(df_curves.index, y_series, marker='o', linestyle='-', label=col.replace('_', ' '))
         
     plt.xlabel('File Number', fontsize=14)
     plt.ylabel('Area under Peak (a.u.)', fontsize=14)
