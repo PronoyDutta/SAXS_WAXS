@@ -550,7 +550,7 @@ def plot_combined_saxs_waxs_ec(df_saxs, df_curves, ec_results, all_data, startin
     # Add legends
     lines_1, labels_1 = ax1.get_legend_handles_labels()
     lines_2, labels_2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=2, frameon=False, fontsize=12)
+    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, frameon=False, fontsize=12)
 
     plt.title('Combined SAXS / WAXS / Electrochemistry', fontsize=16, pad=30)
     plt.tight_layout()

@@ -107,13 +107,38 @@ def contourplot(
     start_row = np.min(indices_within_range)
     end_row = np.max(indices_within_range)
     
-    # Check if new_time_dict contains raw timestamps (strings/bytes) or elapsed seconds (floats)
-    is_raw_timestamps = isinstance(keys[0], (int, np.integer)) and isinstance(new_time_dict[keys[0]], (str, bytes))
-    
-    if is_raw_timestamps:
-        val0 = new_time_dict[starting_file]
-        if isinstance(val0, bytes): val0 = val0.decode('utf-8')
-        base_time = datetime.strptime(str(val0), '%Y-%m-%dT%H:%M:%S')
+    # ---- Robust Timestamp Extraction ----
+    keys = list(new_time_dict.keys())
+    if len(keys) > 0 and isinstance(new_time_dict[keys[0]], (int, np.integer, float)):
+        file_vals = list(new_time_dict.values())
+        if all(isinstance(v, (int, np.integer)) for v in file_vals) and min(file_vals) >= 1:
+            file_to_time = {v: float(k) for k, v in new_time_dict.items()}
+            base_time = file_to_time.get(starting_file, 0.0)
+            get_elapsed = lambda f: file_to_time.get(f, 0.0) - base_time
+        else:
+            def parse_ts(v):
+                if isinstance(v, (int, float, np.number)): return float(v)
+                if isinstance(v, bytes): v = v.decode('utf-8')
+                try: return datetime.strptime(str(v), '%Y-%m-%dT%H:%M:%S').timestamp()
+                except: return float(v)
+            def get_val(d, k):
+                if k in d: return d[k]
+                if str(k) in d: return d[str(k)]
+                try: return d[int(k)]
+                except: return None
+            
+            base_val = get_val(new_time_dict, starting_file)
+            base_time = parse_ts(base_val) if base_val is not None else 0.0
+            get_elapsed = lambda f: parse_ts(get_val(new_time_dict, f)) - base_time if get_val(new_time_dict, f) is not None else 0.0
+    else:
+        def parse_ts(v):
+            if isinstance(v, (int, float, np.number)): return float(v)
+            if isinstance(v, bytes): v = v.decode('utf-8')
+            try: return datetime.strptime(str(v), '%Y-%m-%dT%H:%M:%S').timestamp()
+            except: return float(v)
+        base_val = new_time_dict.get(starting_file)
+        base_time = parse_ts(base_val) if base_val is not None else 0.0
+        get_elapsed = lambda f: parse_ts(new_time_dict.get(f)) - base_time if new_time_dict.get(f) is not None else 0.0
 
     # Process data matrices
     for file_number in range(starting_file, last_file + 1):
@@ -123,18 +148,7 @@ def contourplot(
             norm_intensity = data_dictionary[file_number].iloc[start_row:end_row + 1, 1]
 
         Intensity_list.append(norm_intensity.to_numpy())
-        
-        # Calculate time elapsed
-        if is_raw_timestamps:
-            val = new_time_dict[file_number]
-            if isinstance(val, bytes): val = val.decode('utf-8')
-            current_time = datetime.strptime(str(val), '%Y-%m-%dT%H:%M:%S')
-            time_elapsed = (current_time - base_time).total_seconds()
-        else:
-            # Legacy format where keys are ordered elapsed seconds
-            time_elapsed = float(keys[file_number - 1] - keys[starting_file - 1])
-            
-        time_t1.append(time_elapsed)
+        time_t1.append(get_elapsed(file_number))
 
     time_hours = np.array(time_t1) / 3600
     if y_axis_mode == 'capacity' and applied_current and active_material_mass:
@@ -306,12 +320,6 @@ def combined_contourplot(
     keys = list(new_time_dict.keys())
     time_t1 = []
     
-    is_raw_timestamps = isinstance(keys[0], (int, np.integer)) and isinstance(new_time_dict[keys[0]], (str, bytes))
-    if is_raw_timestamps:
-        val0 = new_time_dict[starting_file]
-        if isinstance(val0, bytes): val0 = val0.decode('utf-8')
-        base_time = datetime.strptime(str(val0), '%Y-%m-%dT%H:%M:%S')
-
     def get_grid(data_dictionary, min_limit, max_limit, normalization_type, is_waxs=False, norm_file=None):
         X1_data_temp = 10 * data_dictionary[starting_file].iloc[:, 0]
         if is_waxs:
@@ -335,14 +343,42 @@ def combined_contourplot(
     X_saxs, Z_saxs = get_grid(saxs_dict, saxs_min_limit, saxs_max_limit, saxs_data_normalization, is_waxs=False, norm_file=Normalization_file_saxs)
     X_waxs, Z_waxs = get_grid(waxs_dict, waxs_min_limit, waxs_max_limit, waxs_data_normalization, is_waxs=True, norm_file=Normalization_file_waxs)
     
-    for file_number in range(starting_file, last_file + 1):
-        if is_raw_timestamps:
-            val = new_time_dict[file_number]
-            if isinstance(val, bytes): val = val.decode('utf-8')
-            current_time = datetime.strptime(str(val), '%Y-%m-%dT%H:%M:%S')
-            time_t1.append((current_time - base_time).total_seconds())
+
+    # ---- Robust Timestamp Extraction ----
+    keys = list(new_time_dict.keys())
+    if len(keys) > 0 and isinstance(new_time_dict[keys[0]], (int, np.integer, float)):
+        file_vals = list(new_time_dict.values())
+        if all(isinstance(v, (int, np.integer)) for v in file_vals) and min(file_vals) >= 1:
+            file_to_time = {v: float(k) for k, v in new_time_dict.items()}
+            base_time = file_to_time.get(starting_file, 0.0)
+            get_elapsed = lambda f: file_to_time.get(f, 0.0) - base_time
         else:
-            time_t1.append(float(keys[file_number - 1] - keys[starting_file - 1]))
+            def parse_ts(v):
+                if isinstance(v, (int, float, np.number)): return float(v)
+                if isinstance(v, bytes): v = v.decode('utf-8')
+                try: return datetime.strptime(str(v), '%Y-%m-%dT%H:%M:%S').timestamp()
+                except: return float(v)
+            def get_val(d, k):
+                if k in d: return d[k]
+                if str(k) in d: return d[str(k)]
+                try: return d[int(k)]
+                except: return None
+            
+            base_val = get_val(new_time_dict, starting_file)
+            base_time = parse_ts(base_val) if base_val is not None else 0.0
+            get_elapsed = lambda f: parse_ts(get_val(new_time_dict, f)) - base_time if get_val(new_time_dict, f) is not None else 0.0
+    else:
+        def parse_ts(v):
+            if isinstance(v, (int, float, np.number)): return float(v)
+            if isinstance(v, bytes): v = v.decode('utf-8')
+            try: return datetime.strptime(str(v), '%Y-%m-%dT%H:%M:%S').timestamp()
+            except: return float(v)
+        base_val = new_time_dict.get(starting_file)
+        base_time = parse_ts(base_val) if base_val is not None else 0.0
+        get_elapsed = lambda f: parse_ts(new_time_dict.get(f)) - base_time if new_time_dict.get(f) is not None else 0.0
+
+    for file_number in range(starting_file, last_file + 1):
+        time_t1.append(get_elapsed(file_number))
 
     if y_axis_mode == 'capacity' and applied_current and active_material_mass:
         y_data = (np.array(time_t1) * applied_current) / (active_material_mass * 3.6)
