@@ -50,7 +50,8 @@ def contourplot(
     tick_label_color='black', tick_label_fontsize=12,
     colorbar_tick_size=5, colorbar_tick_label_fontsize=10,
     starting_file=1, last_file=None,
-    elec_df_2=None, applied_current=None, active_material_mass=None
+    applied_current=None, active_material_mass=None,
+    starting_cycle=None, final_cycle=None, ec_results=None, discharge_files=None
 ):
     """
     Generates a contour plot for SAXS/WAXS data correlated with electrochemical data.
@@ -82,8 +83,52 @@ def contourplot(
     - applied_current (float, optional): Applied current in mA (required if y_axis_mode='capacity').
     - active_material_mass (float, optional): Active material mass in mg (required if y_axis_mode='capacity').
     """
+    if ec_results is not None and starting_cycle is not None and final_cycle is not None:
+        saxs_files = ec_results.get('saxs_file_numbers', [])
+        if saxs_files and len(saxs_files) > 0:
+            start_idx = max(0, int(2 * starting_cycle - 2))
+            end_idx = min(len(saxs_files) - 1, int(2 * final_cycle))
+            if start_idx < len(saxs_files) and end_idx < len(saxs_files):
+                starting_file = saxs_files[start_idx]
+                last_file = saxs_files[end_idx]
+                
+            if 'cycle_change_indices' in ec_results:
+                cycle_indices = ec_results['cycle_change_indices']
+                s_idx = None
+                e_idx = None
+                for i, file in enumerate(saxs_files):
+                    if file >= starting_file and s_idx is None:
+                        s_idx = i
+                    if file >= last_file and e_idx is None:
+                        e_idx = i
+                        break
+                if s_idx is None: s_idx = 0
+                if e_idx is None or e_idx >= len(cycle_indices): e_idx = len(cycle_indices) - 1
+                
+                elec_df_full = ec_results.get('filtered_dataframe')
+                if elec_df_full is not None:
+                    try:
+                        elec_df_to_plot = elec_df_full.loc[cycle_indices[s_idx]:cycle_indices[e_idx]]
+                    except KeyError:
+                        elec_df_to_plot = elec_df_full
+                else:
+                    elec_df_to_plot = None
+            else:
+                elec_df_to_plot = ec_results.get('filtered_dataframe') if ec_results else None
+    else:
+        elec_df_to_plot = ec_results.get('filtered_dataframe') if ec_results else None
+        print(f"Plotting Graph for cycles {starting_cycle} to {final_cycle}")
+
     if last_file is None:
         last_file = max(data_dictionary.keys())
+
+    discharge_file = "N/A"
+    if discharge_files is not None and starting_cycle is not None:
+        idx = int(starting_cycle) - 1
+        if 0 <= idx < len(discharge_files):
+            discharge_file = discharge_files[idx]
+            
+    print(f"Starting file: {starting_file}, Discharge file: {discharge_file}, Last file: {last_file}")
         
     wavelength_nm = 0.154  # Cu K-alpha wavelength in nm
     fntsize = 16
@@ -167,17 +212,17 @@ def contourplot(
     fig, axs = plt.subplots(1, 2, figsize=(8, 6), sharey=True, gridspec_kw={'width_ratios': [1, 4]})
 
     # Left subplot: Electrochemical
-    if elec_df_2 is not None and not elec_df_2.empty:
-        # Assume 'time/s' and 'Ewe/V' are columns in elec_df_2
-        if 'time/s' in elec_df_2.columns and 'Ewe/V' in elec_df_2.columns:
-            time_col = elec_df_2['time/s']
-            volt_col = elec_df_2['Ewe/V']
-        elif 6 in elec_df_2.columns and 2 in elec_df_2.columns: # HDF5 format fallback
-            volt_col = elec_df_2[6]
-            time_col = elec_df_2[2]
+    if elec_df_to_plot is not None and not elec_df_to_plot.empty:
+        # Assume 'time/s' and 'Ewe/V' are columns
+        if 'time/s' in elec_df_to_plot.columns and 'Ewe/V' in elec_df_to_plot.columns:
+            time_col = elec_df_to_plot['time/s']
+            volt_col = elec_df_to_plot['Ewe/V']
+        elif len(elec_df_to_plot.columns) > 6: # Standard bio-logic column index fallback
+            time_col = elec_df_to_plot.iloc[:, 2] if 'time/s' not in elec_df_to_plot.columns else elec_df_to_plot['time/s']
+            volt_col = elec_df_to_plot.iloc[:, 6] if 'Ewe/V' not in elec_df_to_plot.columns else elec_df_to_plot['Ewe/V']
         else:
-            time_col = elec_df_2.iloc[:, 0]
-            volt_col = elec_df_2.iloc[:, 1]
+            time_col = elec_df_to_plot.iloc[:, 0]
+            volt_col = elec_df_to_plot.iloc[:, 1]
             
         if y_axis_mode == 'capacity' and applied_current and active_material_mass:
             left_y = ((time_col - time_col.iloc[0]) * applied_current) / (active_material_mass * 3.6)
@@ -304,14 +349,60 @@ def combined_contourplot(
     tick_label_color='black', tick_label_fontsize=12,
     colorbar_tick_size=5, colorbar_tick_label_fontsize=10,
     starting_file=1, last_file=None,
-    elec_df_2=None, applied_current=None, active_material_mass=None,
-    discharge_files=None
+    applied_current=None, active_material_mass=None,
+    discharge_files=None,
+    starting_cycle=None, final_cycle=None, ec_results=None
 ):
     """
     Generates a combined contour plot for Electrochemical data, SAXS, and WAXS side-by-side.
     """
+    if ec_results is not None and starting_cycle is not None and final_cycle is not None:
+        saxs_files = ec_results.get('saxs_file_numbers', [])
+        if saxs_files and len(saxs_files) > 0:
+            start_idx = max(0, int(2 * starting_cycle - 2))
+            end_idx = min(len(saxs_files) - 1, int(2 * final_cycle))
+            if start_idx < len(saxs_files) and end_idx < len(saxs_files):
+                starting_file = saxs_files[start_idx]
+                last_file = saxs_files[end_idx]
+                
+            # Filter the electrochemistry dataframe to only the selected cycles
+            if 'cycle_change_indices' in ec_results:
+                cycle_indices = ec_results['cycle_change_indices']
+                s_idx = None
+                e_idx = None
+                for i, file in enumerate(saxs_files):
+                    if file >= starting_file and s_idx is None:
+                        s_idx = i
+                    if file >= last_file and e_idx is None:
+                        e_idx = i
+                        break
+                if s_idx is None: s_idx = 0
+                if e_idx is None or e_idx >= len(cycle_indices): e_idx = len(cycle_indices) - 1
+                
+                elec_df_full = ec_results.get('filtered_dataframe')
+                if elec_df_full is not None:
+                    try:
+                        elec_df_to_plot = elec_df_full.loc[cycle_indices[s_idx]:cycle_indices[e_idx]]
+                    except KeyError:
+                        elec_df_to_plot = elec_df_full
+                else:
+                    elec_df_to_plot = None
+            else:
+                elec_df_to_plot = ec_results.get('filtered_dataframe') if ec_results else None
+    else:
+        elec_df_to_plot = ec_results.get('filtered_dataframe') if ec_results else None
+        print(f"Plotting Combined Graph for cycles {starting_cycle} to {final_cycle}")
+
     if last_file is None:
         last_file = max(saxs_dict.keys())
+        
+    discharge_file = "N/A"
+    if discharge_files is not None and starting_cycle is not None:
+        idx = int(starting_cycle) - 1
+        if 0 <= idx < len(discharge_files):
+            discharge_file = discharge_files[idx]
+            
+    print(f"Starting file: {starting_file}, Discharge file: {discharge_file}, Last file: {last_file}")
         
     wavelength_nm = 0.154  # Cu K-alpha wavelength in nm
     fntsize = 16
@@ -394,13 +485,14 @@ def combined_contourplot(
 
     fig, axs = plt.subplots(1, 3, figsize=(12, 6), sharey=True, gridspec_kw={'width_ratios': [1.5, 3, 3]})
 
-    if elec_df_2 is not None and not elec_df_2.empty:
-        if 'time/s' in elec_df_2.columns and 'Ewe/V' in elec_df_2.columns:
-            time_col, volt_col = elec_df_2['time/s'], elec_df_2['Ewe/V']
-        elif 6 in elec_df_2.columns and 2 in elec_df_2.columns:
-            volt_col, time_col = elec_df_2[6], elec_df_2[2]
+    if elec_df_to_plot is not None and not elec_df_to_plot.empty:
+        if 'time/s' in elec_df_to_plot.columns and 'Ewe/V' in elec_df_to_plot.columns:
+            time_col, volt_col = elec_df_to_plot['time/s'], elec_df_to_plot['Ewe/V']
+        elif len(elec_df_to_plot.columns) > 6:
+            time_col = elec_df_to_plot.iloc[:, 2] if 'time/s' not in elec_df_to_plot.columns else elec_df_to_plot['time/s']
+            volt_col = elec_df_to_plot.iloc[:, 6] if 'Ewe/V' not in elec_df_to_plot.columns else elec_df_to_plot['Ewe/V']
         else:
-            time_col, volt_col = elec_df_2.iloc[:, 0], elec_df_2.iloc[:, 1]
+            time_col, volt_col = elec_df_to_plot.iloc[:, 0], elec_df_to_plot.iloc[:, 1]
             
         if y_axis_mode == 'capacity' and applied_current and active_material_mass:
             left_y = ((time_col - time_col.iloc[0]) * applied_current) / (active_material_mass * 3.6)
@@ -475,10 +567,10 @@ def combined_contourplot(
             if starting_file <= d_file <= last_file:
                 idx = d_file - starting_file
                 d_y = y_data[idx]
-                if elec_df_2 is not None and not elec_df_2.empty:
-                    axs[0].axhline(y=d_y, color='r', linestyle='-.', linewidth=1.5)
-                axs[1].axhline(y=d_y, color='r', linestyle='-.', linewidth=1.5)
-                axs[2].axhline(y=d_y, color='r', linestyle='-.', linewidth=1.5)
+                if elec_df_to_plot is not None and not elec_df_to_plot.empty:
+                    axs[0].axhline(y=d_y, color='white', linestyle='--', linewidth=1.2, alpha=0.5)
+                axs[1].axhline(y=d_y, color='white', linestyle='--', linewidth=1.2, alpha=0.5)
+                axs[2].axhline(y=d_y, color='white', linestyle='--', linewidth=1.2, alpha=0.5)
 
     axs[0].tick_params(axis='both', labelsize=fntsize)
     axs[1].tick_params(axis='both', labelsize=fntsize)

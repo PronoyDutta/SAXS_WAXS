@@ -225,50 +225,74 @@ def interactive_fit_viewer(data_dict, df_curves, file_numbers, mean_positions, m
         plt.xlabel("q (nm⁻¹)")
         plt.ylabel("Intensity (a.u.)")
         plt.title(f"Overlayed Fit for File: {file_key}")
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.legend(by_label.values(), by_label.keys(), bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid(True)
         plt.show()
 
     interact(plot_overlay, file_key=IntSlider(min=min(valid_files), max=max(valid_files), step=1, description='File Key', value=min(valid_files)))
 
-def plot_peak_areas(df_curves, window_length=15, smoothing_method='savgol', polyorder=3, gaussian_sigma=3.0, filter_error_threshold=1.0):
+def plot_peak_areas(df_curves, window_length=15, smoothing_method='savgol', polyorder=3, gaussian_sigma=3.0, filter_error_threshold=1.0, starting_cycle=None, final_cycle=None, ec_results=None, starting_file=None, last_file=None, plot_cycle_lines=True):
     import matplotlib.pyplot as plt
     import pandas as pd
     import numpy as np
     from scipy.signal import savgol_filter
     from scipy.ndimage import gaussian_filter1d
     
+    df_plot = df_curves.copy()
+    if ec_results is not None and starting_cycle is not None and final_cycle is not None:
+        saxs_files = ec_results.get('saxs_file_numbers', [])
+        if saxs_files and len(saxs_files) > 0:
+            start_idx = max(0, int(2 * starting_cycle - 2))
+            end_idx = min(len(saxs_files) - 1, int(2 * final_cycle))
+            if start_idx < len(saxs_files) and end_idx < len(saxs_files):
+                starting_file = saxs_files[start_idx]
+                last_file = saxs_files[end_idx]
+                
+    if starting_file is not None:
+        df_plot = df_plot[df_plot.index >= starting_file]
+    if last_file is not None:
+        df_plot = df_plot[df_plot.index <= last_file]
+        
     plt.figure(figsize=(8, 5))
     
-    # Find all columns that match 'Peak_X_Area'
-    area_cols = [col for col in df_curves.columns if 'Area' in col and 'Peak' in col]
+    is_size_plot = any('Size' in col for col in df_plot.columns)
+    
+    if is_size_plot:
+        area_cols = [col for col in df_plot.columns if 'Size' in col and 'Peak' in col and 'Error' not in col]
+        ylabel_text = 'Particle Size (Å)'
+        title_text = 'Particle Size vs File Number'
+    else:
+        area_cols = [col for col in df_plot.columns if 'Area' in col and 'Peak' in col]
+        ylabel_text = 'Area under Peak (a.u.)'
+        title_text = 'Peak Area vs File Number'
     
     if not area_cols:
-        print("No peak areas found in the dataframe. The fits might have failed or peaks were below threshold.")
+        print("No valid Peak Area or Particle Size columns found in the provided dataframe.")
         return
         
     for col in area_cols:
         # Create a working copy of the series
-        y_series = df_curves[col].copy()
+        y_series = df_plot[col].copy()
         
         # Filter out fits with high error if the threshold is provided
         if filter_error_threshold is not None:
-            err_col = col.replace('Area', 'FWHM error')
-            if err_col in df_curves.columns:
-                high_error_mask = df_curves[err_col] > filter_error_threshold
+            if is_size_plot:
+                err_col = col + "_Error"
+            else:
+                err_col = col.replace('Area', 'FWHM error')
+                
+            if err_col in df_plot.columns:
+                high_error_mask = df_plot[err_col] > filter_error_threshold
                 y_series.loc[high_error_mask] = np.nan
                 
         if window_length > 1:
             # Plot raw data as faint points
-            plt.plot(df_curves.index, y_series, marker='o', linestyle='', alpha=0.3, color='tab:blue', label=f"{col.replace('_', ' ')} (Raw)")
+            plt.plot(df_plot.index, y_series, marker='o', linestyle='', alpha=0.3, color='tab:blue', label=f"{col.replace('_', ' ')} (Raw)")
             
             # Apply chosen smoothing method
-            # For rolling window methods, keeping NaNs is usually fine as long as min_periods=1,
-            # but for savgol/gaussian, NaNs will cause issues. We interpolate or fill for the smoothing layer.
             y_raw_for_smooth = y_series.interpolate(method='linear').fillna(0).values
             
             if smoothing_method == 'savgol':
-                # savgol requires window_length to be odd
                 wl = window_length if window_length % 2 != 0 else window_length + 1
                 smoothed = savgol_filter(y_raw_for_smooth, window_length=wl, polyorder=polyorder)
             elif smoothing_method == 'gaussian':
@@ -280,14 +304,28 @@ def plot_peak_areas(df_curves, window_length=15, smoothing_method='savgol', poly
             else:
                 smoothed = y_raw_for_smooth
                 
-            plt.plot(df_curves.index, smoothed, linestyle='-', linewidth=2, color='tab:red', label=f"{col.replace('_', ' ')} (Trend - {smoothing_method})")
+            plt.plot(df_plot.index, smoothed, linestyle='-', linewidth=2, color='tab:red', label=f"{col.replace('_', ' ')} (Trend - {smoothing_method})")
         else:
-            plt.plot(df_curves.index, y_series, marker='o', linestyle='-', label=col.replace('_', ' '))
-        
+            plt.plot(df_plot.index, y_series, marker='o', linestyle='-', label=col.replace('_', ' '))
+            
+    if ec_results is not None and plot_cycle_lines:
+        saxs_files = ec_results.get('saxs_file_numbers', [])
+        for i in range(1, len(saxs_files)):
+            file_num = saxs_files[i]
+            if not df_plot.empty and df_plot.index.min() <= file_num <= df_plot.index.max():
+                if i % 2 != 0:
+                    plt.axvline(x=file_num, color='green', linestyle=':', alpha=0.8, label='Discharge End' if i==1 else "")
+                else:
+                    plt.axvline(x=file_num, color='red', linestyle=':', alpha=0.8, label='Charge End' if i==2 else "")
+                    
+    # Handle duplicate labels in legend
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    
     plt.xlabel('File Number', fontsize=14)
-    plt.ylabel('Area under Peak (a.u.)', fontsize=14)
-    plt.title('Peak Area vs File Number', fontsize=16)
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.ylabel(ylabel_text, fontsize=14)
+    plt.title(title_text, fontsize=16)
+    plt.legend(by_label.values(), by_label.keys(), bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.show()
@@ -357,45 +395,104 @@ def calculate_saxs_invariants(data_dict, file_numbers, q_range_intensity=(0.2, 4
                 
     return df_saxs
 
-def plot_saxs_invariants(df_saxs):
+def plot_saxs_invariants(df_saxs, normalize=True, starting_cycle=None, final_cycle=None, ec_results=None, starting_file=None, last_file=None, plot_cycle_lines=True):
     import matplotlib.pyplot as plt
+    import pandas as pd
     
-    if "Integrated_Intensity" in df_saxs.columns:
-        valid_data = df_saxs["Integrated_Intensity"].dropna()
+    df_plot = df_saxs.copy()
+    if ec_results is not None and starting_cycle is not None and final_cycle is not None:
+        saxs_files = ec_results.get('saxs_file_numbers', [])
+        if saxs_files and len(saxs_files) > 0:
+            start_idx = max(0, int(2 * starting_cycle - 2))
+            end_idx = min(len(saxs_files) - 1, int(2 * final_cycle))
+            if start_idx < len(saxs_files) and end_idx < len(saxs_files):
+                starting_file = saxs_files[start_idx]
+                last_file = saxs_files[end_idx]
+                
+    if starting_file is not None:
+        df_plot = df_plot[df_plot.index >= starting_file]
+    if last_file is not None:
+        df_plot = df_plot[df_plot.index <= last_file]
+        
+    if "Integrated_Intensity" in df_plot.columns:
+        valid_data = df_plot["Integrated_Intensity"].dropna()
         if not valid_data.empty:
-            max_val = valid_data.max()
-            min_val = valid_data.min()
-            y_vals = ((df_saxs["Integrated_Intensity"] - min_val) / (max_val - min_val)) * 100
+            if normalize:
+                max_val = valid_data.max()
+                min_val = valid_data.min()
+                if max_val > min_val:
+                    y_vals = ((df_plot["Integrated_Intensity"] - min_val) / (max_val - min_val)) * 100
+                else:
+                    y_vals = df_plot["Integrated_Intensity"]
+                ylabel = 'Intensity (%)'
+            else:
+                y_vals = df_plot["Integrated_Intensity"]
+                ylabel = 'Intensity (a.u.)'
             
             plt.figure(figsize=(6, 4))
-            plt.plot(df_saxs.index, y_vals, marker='o')
-            plt.title('Integrated Intensity (%)')
+            plt.plot(df_plot.index, y_vals, marker='o')
+            if ec_results is not None and plot_cycle_lines:
+                saxs_files = ec_results.get('saxs_file_numbers', [])
+                for i in range(1, len(saxs_files)):
+                    file_num = saxs_files[i]
+                    if not df_plot.empty and df_plot.index.min() <= file_num <= df_plot.index.max():
+                        if i % 2 != 0:
+                            plt.axvline(x=file_num, color='green', linestyle=':', alpha=0.8)
+                        else:
+                            plt.axvline(x=file_num, color='red', linestyle=':', alpha=0.8)
+            plt.title('Integrated Intensity')
             plt.xlabel('File Index')
-            plt.ylabel('Intensity (%)')
+            plt.ylabel(ylabel)
             plt.grid(True)
             plt.show()
 
-    if "Mean_q_nm-1" in df_saxs.columns:
+    if "Mean_q_nm-1" in df_plot.columns:
         plt.figure(figsize=(6, 4))
-        plt.plot(df_saxs.index, df_saxs["Mean_q_nm-1"], marker='o', color='orange')
+        plt.plot(df_plot.index, df_plot["Mean_q_nm-1"], marker='o', color='orange')
+        if ec_results is not None and plot_cycle_lines:
+            saxs_files = ec_results.get('saxs_file_numbers', [])
+            for i in range(1, len(saxs_files)):
+                file_num = saxs_files[i]
+                if not df_plot.empty and df_plot.index.min() <= file_num <= df_plot.index.max():
+                    if i % 2 != 0:
+                        plt.axvline(x=file_num, color='green', linestyle=':', alpha=0.8)
+                    else:
+                        plt.axvline(x=file_num, color='red', linestyle=':', alpha=0.8)
         plt.title('Mean q Position ⟨q⟩')
         plt.xlabel('File Index')
         plt.ylabel('q (nm⁻¹)')
         plt.grid(True)
         plt.show()
 
-    if "Invariant" in df_saxs.columns:
-        valid_data = df_saxs["Invariant"].dropna()
+    if "Invariant" in df_plot.columns:
+        valid_data = df_plot["Invariant"].dropna()
         if not valid_data.empty:
-            max_val = valid_data.max()
-            min_val = valid_data.min()
-            y_vals = ((df_saxs["Invariant"] - min_val) / (max_val - min_val)) * 100
+            if normalize:
+                max_val = valid_data.max()
+                min_val = valid_data.min()
+                if max_val > min_val:
+                    y_vals = ((df_plot["Invariant"] - min_val) / (max_val - min_val)) * 100
+                else:
+                    y_vals = df_plot["Invariant"]
+                ylabel = 'Invariant (%)'
+            else:
+                y_vals = df_plot["Invariant"]
+                ylabel = 'Invariant (a.u.)'
             
             plt.figure(figsize=(6, 4))
-            plt.plot(df_saxs.index, y_vals, marker='o', color='green')
-            plt.title('Scattering Invariant (%)')
+            plt.plot(df_plot.index, y_vals, marker='o', color='green')
+            if ec_results is not None and plot_cycle_lines:
+                saxs_files = ec_results.get('saxs_file_numbers', [])
+                for i in range(1, len(saxs_files)):
+                    file_num = saxs_files[i]
+                    if not df_plot.empty and df_plot.index.min() <= file_num <= df_plot.index.max():
+                        if i % 2 != 0:
+                            plt.axvline(x=file_num, color='green', linestyle=':', alpha=0.8)
+                        else:
+                            plt.axvline(x=file_num, color='red', linestyle=':', alpha=0.8)
+            plt.title('Scattering Invariant')
             plt.xlabel('File Index')
-            plt.ylabel('Invariant (%)')
+            plt.ylabel(ylabel)
             plt.grid(True)
             plt.show()
 
@@ -403,9 +500,18 @@ def plot_saxs_invariants(df_saxs):
 
 
 
-def plot_combined_saxs_waxs_ec(df_saxs, df_curves, ec_results, all_data, starting_file, last_file, 
+def plot_combined_saxs_waxs_ec(df_saxs, df_curves, ec_results, all_data, starting_file=None, last_file=None, 
                                peak_col="Peak_1_Area", saxs_col="Integrated_Intensity",
-                               apply_smoothing=True, window_length=25, filter_error_threshold=0.1):
+                               apply_smoothing=True, window_length=25, filter_error_threshold=0.1, starting_cycle=None, final_cycle=None):
+    if ec_results is not None and starting_cycle is not None and final_cycle is not None:
+        saxs_files = ec_results.get('saxs_file_numbers', [])
+        if saxs_files and len(saxs_files) > 0:
+            start_idx = max(0, int(2 * starting_cycle - 2))
+            end_idx = min(len(saxs_files) - 1, int(2 * final_cycle))
+            if start_idx < len(saxs_files) and end_idx < len(saxs_files):
+                starting_file = saxs_files[start_idx]
+                last_file = saxs_files[end_idx]
+
     import matplotlib.pyplot as plt
     import numpy as np
     from datetime import datetime
