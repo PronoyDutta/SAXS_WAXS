@@ -122,12 +122,22 @@ def contourplot(
     if last_file is None:
         last_file = max(data_dictionary.keys())
 
+    if discharge_files is None and ec_results is not None:
+        discharge_files = ec_results.get('discharge_saxs_files')
+
     discharge_file = "N/A"
     if discharge_files is not None and starting_cycle is not None:
         idx = int(starting_cycle) - 1
         if 0 <= idx < len(discharge_files):
             discharge_file = discharge_files[idx]
             
+    if str(Normalization_file).lower() == 'starting_file':
+        Normalization_file = starting_file
+    elif str(Normalization_file).lower() == 'discharge_file' and discharge_file != "N/A":
+        Normalization_file = discharge_file
+    elif str(Normalization_file).lower() == 'last_file':
+        Normalization_file = last_file
+
     print(f"Starting file: {starting_file}, Discharge file: {discharge_file}, Last file: {last_file}")
         
     wavelength_nm = 0.154  # Cu K-alpha wavelength in nm
@@ -402,6 +412,16 @@ def combined_contourplot(
         if 0 <= idx < len(discharge_files):
             discharge_file = discharge_files[idx]
             
+    if str(Normalization_file_saxs).lower() == 'starting_file':
+        Normalization_file_saxs = starting_file
+    elif str(Normalization_file_saxs).lower() == 'discharge_file' and discharge_file != "N/A":
+        Normalization_file_saxs = discharge_file
+        
+    if str(Normalization_file_waxs).lower() == 'starting_file':
+        Normalization_file_waxs = starting_file
+    elif str(Normalization_file_waxs).lower() == 'discharge_file' and discharge_file != "N/A":
+        Normalization_file_waxs = discharge_file
+
     print(f"Starting file: {starting_file}, Discharge file: {discharge_file}, Last file: {last_file}")
         
     wavelength_nm = 0.154  # Cu K-alpha wavelength in nm

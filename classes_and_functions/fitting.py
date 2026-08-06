@@ -225,6 +225,8 @@ def interactive_fit_viewer(data_dict, df_curves, file_numbers, mean_positions, m
         plt.xlabel("q (nm⁻¹)")
         plt.ylabel("Intensity (a.u.)")
         plt.title(f"Overlayed Fit for File: {file_key}")
+        handles, labels = plt.gca().get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
         plt.legend(by_label.values(), by_label.keys(), bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid(True)
         plt.show()
@@ -259,7 +261,7 @@ def plot_peak_areas(df_curves, window_length=15, smoothing_method='savgol', poly
     
     if is_size_plot:
         area_cols = [col for col in df_plot.columns if 'Size' in col and 'Peak' in col and 'Error' not in col]
-        ylabel_text = 'Particle Size (Å)'
+        ylabel_text = 'Particle Size (nm)'
         title_text = 'Particle Size vs File Number'
     else:
         area_cols = [col for col in df_plot.columns if 'Area' in col and 'Peak' in col]
