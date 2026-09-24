@@ -663,3 +663,141 @@ def plot_combined_saxs_waxs_ec(df_saxs, df_curves, ec_results, all_data, startin
     plt.title('Combined SAXS / WAXS / Electrochemistry', fontsize=16, pad=30)
     plt.tight_layout()
     plt.show()
+
+def plot_particle_size_vs_capacity(df_scherrer, ec_results, all_data=None, peak_index=1, selected_cycle=1, min_capacity=None, max_capacity=None, filter_error_threshold=2.0, polyorder=3):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    from datetime import datetime
+    
+    fig, ax1 = plt.subplots(figsize=(6, 4))
+    
+    if ec_results is None:
+        print("ec_results is required.")
+        return
+        
+    elec_df = ec_results['filtered_dataframe']
+    applied_current = ec_results['applied_current']
+    active_material_mass = ec_results['active_material_mass']
+    
+    if 'time/s' in elec_df.columns:
+        time_col = 'time/s'
+        volt_col = 'Ewe/V'
+    elif 9 in elec_df.columns:
+        time_col = 2
+        volt_col = 6
+    else:
+        time_col = elec_df.columns[2]
+        volt_col = elec_df.columns[6]
+        
+    cycle_indices = ec_results['cycle_change_indices']
+    
+    start_cycle_idx = max(0, int(2 * selected_cycle - 2))
+    end_cycle_idx = min(len(cycle_indices)-1, int(2 * selected_cycle))
+    
+    start_idx = cycle_indices[start_cycle_idx]
+    end_idx = cycle_indices[end_cycle_idx]
+    
+    loc_start = elec_df.index.get_loc(start_idx)
+    loc_end = elec_df.index.get_loc(end_idx)
+    
+    elec_df_cycle = elec_df.iloc[loc_start:loc_end+1]
+    
+    ec_time = elec_df_cycle[time_col].values
+    ec_time_relative = ec_time - ec_time[0]
+    ec_capacity = (ec_time_relative * applied_current) / (active_material_mass * 3.6)
+    ec_voltage = elec_df_cycle[volt_col].values
+    
+    ax1.plot(ec_capacity, ec_voltage, color='gray', linestyle=':', alpha=0.5, label='6M LiTFSI/DME-HFE')
+    ax1.set_xlabel('Specific capacity (mAh g$^{-1}$)')
+    ax1.set_ylabel('Potential (E vs. Li/Li$^+$)')
+    
+    ax2 = ax1.twinx()
+    df_plot = df_scherrer.copy()
+    
+    saxs_files = ec_results.get('saxs_file_numbers', [])
+    if saxs_files and len(saxs_files) > 0:
+        if start_cycle_idx < len(saxs_files) and end_cycle_idx < len(saxs_files):
+            starting_file = saxs_files[start_cycle_idx]
+            last_file = saxs_files[end_cycle_idx]
+            
+            # Recompute capacity from starting_file to match EC
+            if all_data is not None:
+                time_dict = all_data.get('TimeStamps_SAXS')
+                if time_dict is not None and starting_file in time_dict:
+                    try:
+                        base_time = datetime.strptime(str(time_dict[starting_file]), '%Y-%m-%dT%H:%M:%S')
+                        is_string = True
+                    except ValueError:
+                        base_time = float(time_dict[starting_file])
+                        is_string = False
+                        
+                    cap_vals = {}
+                    for idx in df_plot.index:
+                        if idx >= starting_file and idx <= last_file and idx in time_dict:
+                            if is_string:
+                                current_time = datetime.strptime(str(time_dict[idx]), '%Y-%m-%dT%H:%M:%S')
+                                t_rel = (current_time - base_time).total_seconds()
+                            else:
+                                t_rel = float(time_dict[idx]) - base_time
+                            cap = (t_rel * applied_current) / (active_material_mass * 3.6)
+                            cap_vals[idx] = cap
+                    
+                    df_plot['Capacity (mAh/g)'] = df_plot.index.map(cap_vals)
+            
+            df_plot = df_plot[(df_plot.index >= starting_file) & (df_plot.index <= last_file)]
+            
+    if 'Capacity (mAh/g)' not in df_plot.columns:
+        print("Capacity column not found in df_scherrer.")
+        return
+        
+    size_col = f"Peak_{peak_index}_Size"
+    err_col = f"Peak_{peak_index}_Size_Error"
+    
+    if size_col not in df_plot.columns:
+        print(f"{size_col} not found in dataframe.")
+        return
+        
+    if filter_error_threshold is not None and err_col in df_plot.columns:
+        high_error_mask = df_plot[err_col] > filter_error_threshold
+        df_plot.loc[high_error_mask, size_col] = np.nan
+        
+    df_plot = df_plot.dropna(subset=[size_col, 'Capacity (mAh/g)'])
+    
+    if min_capacity is not None:
+        df_plot = df_plot[df_plot['Capacity (mAh/g)'] >= min_capacity]
+    if max_capacity is not None:
+        df_plot = df_plot[df_plot['Capacity (mAh/g)'] <= max_capacity]
+        
+    capacity_vals = df_plot['Capacity (mAh/g)'].values
+    size_vals = df_plot[size_col].values
+    
+    if len(capacity_vals) == 0:
+        print("No data left after filtering.")
+        return
+
+    ax2.scatter(capacity_vals, size_vals, color='tab:blue', alpha=0.6, edgecolors='w', s=50, label='Particle size')
+    
+    if err_col in df_plot.columns:
+        err_vals = df_plot[err_col].values
+        ax2.fill_between(capacity_vals, size_vals - err_vals, size_vals + err_vals, color='tab:blue', alpha=0.2)
+        
+    if len(capacity_vals) > polyorder:
+        coeffs = np.polyfit(capacity_vals, size_vals, polyorder)
+        poly_func = np.poly1d(coeffs)
+        
+        cap_smooth = np.linspace(capacity_vals.min(), capacity_vals.max(), 100)
+        fit_vals = poly_func(cap_smooth)
+        
+        ax2.plot(cap_smooth, fit_vals, color='tab:red', label='Polynomial fit')
+        
+    ax2.set_ylabel('Li$_2$S particle size (nm)', color='tab:blue')
+    ax2.tick_params(axis='y', labelcolor='tab:blue')
+    
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left', frameon=False)
+    
+    plt.title('SPSE')
+    plt.tight_layout()
+    plt.show()
